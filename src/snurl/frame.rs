@@ -32,13 +32,15 @@ pub(crate) struct RawCommonHeader {
 }
 
 impl RawCommonHeader {
+	pub(crate) const RAW_LEN: usize = 12;
+
 	pub(crate) fn read<R: Buf>(r: &mut R) -> Result<RawCommonHeader, StdIoError> {
 		// size of raw header
 		if r.remaining() < 1 {
 			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for version"))
 		}
 		let version = r.get_u8();
-		if version != 0x00 {
+		if version != PROTOCOL_VERSION {
 			return Err(StdIoError::new(StdIoErrorKind::InvalidData, "unsupported version"));
 		}
 
@@ -67,7 +69,7 @@ impl RawCommonHeader {
 	}
 
 	pub(crate) fn write<W: BufMut>(&self, w: &mut W) -> Result<(), StdIoError> {
-		if w.remaining_mut() < 12 {
+		if w.remaining_mut() < Self::RAW_LEN {
 			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for common header"));
 		}
 
@@ -81,8 +83,42 @@ impl RawCommonHeader {
 	}
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RawDataFrameHeader {
+	pub(crate) sn: SerialNumber,
+	pub(crate) len: u8,
+}
+
+impl RawDataFrameHeader {
+	pub(crate) const RAW_LEN: usize = 3;
+
+	pub(crate) fn read<R: Buf>(r: &mut R) -> Result<RawDataFrameHeader, StdIoError> {
+		if r.remaining() < Self::RAW_LEN {
+			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame header"))
+		}
+
+		let sn = r.get_u16_le().into();
+		let len = r.get_u8();
+		Ok(RawDataFrameHeader{
+			sn: sn,
+			len: len,
+		})
+	}
+
+	fn write<W: BufMut>(&self, w: &mut W) -> Result<(), StdIoError> {
+		if w.remaining_mut() < Self::RAW_LEN {
+			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame header"))
+		}
+
+		w.put_u16_le(self.sn.into());
+		w.put_u8(self.len);
+		Ok(())
+	}
+}
+
 pub type RequestId = u32;
 
+#[allow(dead_code)]
 pub struct DataAckEntry {
 	first: SerialNumber,
 	last: SerialNumber,
@@ -95,16 +131,21 @@ pub struct DataFrame {
 }
 
 impl DataFrame {
+	// false positive
+	#[allow(dead_code)]
 	pub(crate) fn write<W: BufMut>(&self, w: &mut W) -> Result<(), StdIoError> {
 		let len = self.payload.len();
 		if len > 255 {
 			return Err(StdIoError::new(StdIoErrorKind::InvalidInput, "payload too large"));
 		}
-		if w.remaining_mut() < 3 + len {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame header"));
+		let hdr = RawDataFrameHeader{
+			sn: self.sn,
+			len: len as u8,
+		};
+		if w.remaining_mut() < RawDataFrameHeader::RAW_LEN + len {
+			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame"));
 		}
-		w.put_u16_le(self.sn.into());
-		w.put_u8(len as u8);
+		hdr.write(w)?;
 		let mut buf = self.payload.clone();
 		w.put(&mut buf);
 		Ok(())
@@ -113,11 +154,6 @@ impl DataFrame {
 	#[inline(always)]
 	pub fn sn(&self) -> SerialNumber {
 		self.sn
-	}
-
-	#[inline(always)]
-	pub fn payload<'x>(&'x self) -> &'x Bytes {
-		&self.payload
 	}
 
 	#[inline(always)]

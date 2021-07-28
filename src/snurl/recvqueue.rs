@@ -78,6 +78,7 @@ impl RecvQueue {
 		self.q.split_off(0)
 	}
 
+	#[allow(dead_code)]
 	pub fn lowest_sn(&self) -> SerialNumber {
 		self.lowest_sn
 	}
@@ -93,13 +94,14 @@ impl RecvQueue {
 		next_sn - 1
 	}
 
+	#[allow(dead_code)]
 	pub fn len(&self) -> usize {
 		self.q.len()
 	}
 }
 
 #[cfg(test)]
-mod tests_RecvQueue {
+mod tests {
 	use super::*;
 
 	#[test]

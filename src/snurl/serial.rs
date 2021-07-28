@@ -1,24 +1,24 @@
 use std::cmp::Ordering;
 use std::ops::{Add, Sub};
 
-type usn = u16;
-type isn = i16;
-static threshold: usn = (usn::MAX >> 1) + 1;
+type Usn = u16;
+type Isn = i16;
+static THRESHOLD: Usn = (Usn::MAX >> 1) + 1;
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct SerialNumber(usn);
+pub struct SerialNumber(Usn);
 
 impl Eq for SerialNumber {}
 
-impl From<SerialNumber> for usn {
-	fn from(sn: SerialNumber) -> usn {
+impl From<SerialNumber> for Usn {
+	fn from(sn: SerialNumber) -> Usn {
 		sn.0
 	}
 }
 
-impl From<usn> for SerialNumber {
-	fn from(v: usn) -> SerialNumber {
+impl From<Usn> for SerialNumber {
+	fn from(v: Usn) -> SerialNumber {
 		SerialNumber(v)
 	}
 }
@@ -29,8 +29,8 @@ impl PartialOrd for SerialNumber {
 			return Some(Ordering::Equal)
 		}
 		let diff = other.0.wrapping_sub(self.0);
-		match diff.partial_cmp(&threshold) {
-			// equality to the threshold means that we cannot say if the number is less or greater -> return None
+		match diff.partial_cmp(&THRESHOLD) {
+			// equality to the THRESHOLD means that we cannot say if the number is less or greater -> return None
 			Some(Ordering::Equal) => None,
 			// for the other values, it just works
 			other => other,
@@ -38,34 +38,34 @@ impl PartialOrd for SerialNumber {
 	}
 }
 
-fn wrapping_sub_to_signed(v1: usn, v2: usn) -> isn {
+fn wrapping_sub_to_signed(v1: Usn, v2: Usn) -> Isn {
 	if v1 >= v2 {
-		v1.wrapping_sub(v2) as isn
+		v1.wrapping_sub(v2) as Isn
 	} else {
-		((v2 ^ 0xffff).wrapping_add(1)).wrapping_add(v1) as isn
+		((v2 ^ 0xffff).wrapping_add(1)).wrapping_add(v1) as Isn
 	}
 }
 
-impl Add<usn> for SerialNumber {
+impl Add<Usn> for SerialNumber {
 	type Output = SerialNumber;
 
-	fn add(self, rhs: usn) -> Self::Output {
-		debug_assert!(rhs < threshold);
+	fn add(self, rhs: Usn) -> Self::Output {
+		debug_assert!(rhs < THRESHOLD);
 		self.0.wrapping_add(rhs).into()
 	}
 }
 
-impl Sub<usn> for SerialNumber {
+impl Sub<Usn> for SerialNumber {
 	type Output = SerialNumber;
 
-	fn sub(self, rhs: usn) -> Self::Output {
-		debug_assert!(rhs < threshold);
+	fn sub(self, rhs: Usn) -> Self::Output {
+		debug_assert!(rhs < THRESHOLD);
 		self.0.wrapping_sub(rhs).into()
 	}
 }
 
 impl Sub<SerialNumber> for SerialNumber {
-	type Output = isn;
+	type Output = Isn;
 
 	fn sub(self, rhs: SerialNumber) -> Self::Output {
 		self.checked_sub(rhs).expect("attempt to subtract two serial numbers which have an undefined difference")
@@ -73,15 +73,15 @@ impl Sub<SerialNumber> for SerialNumber {
 }
 
 impl SerialNumber {
-	pub fn checked_add_u16(self, rhs: usn) -> Option<SerialNumber> {
-		if rhs >= threshold {
+	pub fn checked_add_u16(self, rhs: Usn) -> Option<SerialNumber> {
+		if rhs >= THRESHOLD {
 			return None
 		}
 		Some(self + rhs)
 	}
 
-	pub fn checked_sub_u16(self, rhs: usn) -> Option<SerialNumber> {
-		if rhs >= threshold {
+	pub fn checked_sub_u16(self, rhs: Usn) -> Option<SerialNumber> {
+		if rhs >= THRESHOLD {
 			return None
 		}
 		Some(self - rhs)
@@ -102,7 +102,7 @@ impl SerialNumber {
 }
 
 #[cfg(test)]
-mod tests_SerialNumber {
+mod tests {
 	use super::*;
 
 	#[test]

@@ -1,23 +1,30 @@
 use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind};
-use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::fmt;
 
 use tokio::net::{UdpSocket, ToSocketAddrs};
 use tokio::io::Result as IoResult;
 
-use bytes::{Bytes, BytesMut, Buf};
+use bytes::{Bytes, BytesMut, Buf, BufMut};
 use getrandom;
 
-use super::frame::{RawPacketType, PacketPayload, RawCommonHeader, AppRequest, AppResponse, ConnectionId, PROTOCOL_VERSION, DataFrame};
+use super::frame::{RawPacketType, PacketPayload, RawCommonHeader, AppRequest, AppResponse, ConnectionId, DataFrame, PROTOCOL_VERSION, RawDataFrameHeader};
 use super::recvqueue::RecvQueue;
+use super::sendqueue::SendQueue;
 use super::serial::SerialNumber;
+
+fn get_random_u16() -> u16 {
+	let mut backing = [0u8; 2];
+	getrandom::getrandom(&mut backing[..]).expect("random data read failed");
+	let buf = &mut &backing[..];
+	buf.get_u16_le()
+}
 
 fn get_random_u32() -> u32 {
 	let mut backing = [0u8; 4];
-	getrandom::getrandom(&mut backing[..]);
+	getrandom::getrandom(&mut backing[..]).expect("random data read failed");
 	let buf = &mut &backing[..];
 	buf.get_u32_le()
 }
@@ -31,12 +38,16 @@ enum PacketResult {
 	PacketReceived,
 	/// Indicates that an echo request was received and a response should be
 	/// sent
+	#[allow(dead_code)]
 	EchoRequest,
 	/// Indicates that an echo response was received
+	#[allow(dead_code)]
 	EchoResponse,
 	/// Application request was received
+	#[allow(dead_code)]
 	AppRequest(AppRequest),
 	/// Application response was received
+	#[allow(dead_code)]
 	AppResponse(AppResponse),
 }
 
@@ -47,18 +58,29 @@ enum HandshakeResult {
 	PacketsRequired,
 }
 
+#[derive(Debug)]
 struct SharedState {
 	pub last_recvd_sn: AtomicU16,
 	pub max_recvd_sn: AtomicU16,
+	pub min_avail_sn: AtomicU16,
+	// This is a channel from the receiver to the transmitter which is read when a new packet is being enqueued or during tx operations to update the tx window
+	pub remote_max_recvd_sn: AtomicU16,
+	// Same as above, but obviously inherently more racey. As last_recvd_sn is best-effort anyway, its good enough.
+	pub remote_last_recvd_sn: AtomicU16,
+	peer_address: RwLock<SocketAddr>,
 	connection_id: AtomicU32,
 }
 
 impl SharedState {
-	fn new() -> SharedState {
+	fn new(initial_peer_addr: SocketAddr) -> SharedState {
 		SharedState{
 			last_recvd_sn: AtomicU16::new(65535u16),
 			max_recvd_sn: AtomicU16::new(65535u16),
+			min_avail_sn: AtomicU16::new(0u16),
 			connection_id: AtomicU32::new(0u32),
+			remote_max_recvd_sn: AtomicU16::new(0u16),
+			remote_last_recvd_sn: AtomicU16::new(0u16),
+			peer_address: RwLock::new(initial_peer_addr),
 		}
 	}
 
@@ -85,6 +107,58 @@ impl SharedState {
 	#[inline]
 	fn change_connection_id(&self, old_conn_id: ConnectionId, new_conn_id: ConnectionId) -> bool {
 		self.connection_id.compare_exchange(old_conn_id, new_conn_id, Ordering::AcqRel, Ordering::Acquire).is_ok()
+	}
+
+	fn compose_header(&self, type_: RawPacketType) -> RawCommonHeader {
+		let min_avail_sn = self.min_avail_sn.load(Ordering::Acquire).into();
+		let last_recvd_sn = self.last_recvd_sn.load(Ordering::Acquire).into();
+		let max_recvd_sn = self.max_recvd_sn.load(Ordering::Acquire).into();
+		RawCommonHeader{
+			version: PROTOCOL_VERSION,
+			type_,
+			connection_id: self.connection_id.load(Ordering::Acquire),
+			min_avail_sn,
+			max_recvd_sn,
+			last_recvd_sn,
+		}
+	}
+
+	fn set_rx_sns(&self, max_recvd_sn: SerialNumber, last_recvd_sn: SerialNumber) {
+		self.max_recvd_sn.store(max_recvd_sn.into(), Ordering::Release);
+		self.last_recvd_sn.store(last_recvd_sn.into(), Ordering::Release);
+	}
+
+	fn set_remote_rx_sns(&self, max_recvd_sn: SerialNumber, last_recvd_sn: SerialNumber) {
+		self.remote_max_recvd_sn.store(max_recvd_sn.into(), Ordering::Release);
+		self.remote_last_recvd_sn.store(last_recvd_sn.into(), Ordering::Release);
+	}
+
+	fn set_tx_sn(&self, min_avail_sn: SerialNumber) {
+		self.min_avail_sn.store(min_avail_sn.into(), Ordering::Release);
+	}
+
+	fn remote_rx_sns(&self) -> (SerialNumber, SerialNumber) {
+		let last_recvd_sn = self.remote_last_recvd_sn.load(Ordering::Acquire).into();
+		let max_recvd_sn = self.remote_max_recvd_sn.load(Ordering::Acquire).into();
+		(max_recvd_sn, last_recvd_sn)
+	}
+
+	#[allow(dead_code)]
+	fn update_peer_address(&self, addr: SocketAddr) {
+		{
+			let guard = self.peer_address.read().unwrap();
+			if *guard == addr {
+				return
+			}
+		}
+		{
+			let mut guard = self.peer_address.write().unwrap();
+			*guard = addr;
+		}
+	}
+
+	fn peer_address(&self) -> SocketAddr {
+		self.peer_address.read().unwrap().clone()
 	}
 }
 
@@ -132,27 +206,20 @@ impl Receiver {
 		panic!("not implemented")
 	}
 
-	fn _compose_header(&self, type_: RawPacketType) -> RawCommonHeader {
+	fn _update_sns(&self) {
 		let max_recvd = self.q.max_consecutive_sn();
-		RawCommonHeader{
-			version: 0x00,
-			type_: type_,
-			connection_id: self.state.connection_id(),
-			// TODO: use correct min_avail_sn
-			min_avail_sn: 0u16.into(),
-			max_recvd_sn: max_recvd,
-			// TODO: use correct last recvd sn
-			last_recvd_sn: max_recvd,
-		}
+		// TODO: use correct last_recvd_sn
+		let last_recvd = max_recvd;
+		self.state.set_rx_sns(max_recvd, last_recvd);
 	}
 
 	async fn _send_ack<A: ToSocketAddrs>(&self, via: &UdpSocket, to: A) -> IoResult<()> {
-		let hdr = self._compose_header(RawPacketType::DataAck);
+		let hdr = self.state.compose_header(RawPacketType::DataAck);
 
 		let mut buf = BytesMut::new();
 		buf.reserve(12);
 		// TODO: send full DACK packet
-		hdr.write(&mut buf);
+		hdr.write(&mut buf)?;
 		let buf = buf.freeze();
 
 		via.send_to(&buf[..], to).await?;
@@ -160,11 +227,11 @@ impl Receiver {
 	}
 
 	async fn _send_echo_response<A: ToSocketAddrs>(&self, via: &UdpSocket, to: A) -> IoResult<()> {
-		let hdr = self._compose_header(RawPacketType::EchoResponse);
+		let hdr = self.state.compose_header(RawPacketType::EchoResponse);
 
 		let mut buf = BytesMut::new();
 		buf.reserve(12);
-		hdr.write(&mut buf);
+		hdr.write(&mut buf)?;
 		let buf = buf.freeze();
 
 		via.send_to(&buf[..], to).await?;
@@ -177,16 +244,13 @@ impl Receiver {
 			if buf.remaining() == 0 {
 				break
 			}
-			if buf.remaining() < 3 {
-				return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes remaining for data header"))
-			}
-			let sn: SerialNumber = buf.get_u16_le().into();
-			let len = buf.get_u8() as usize;
+			let frame_hdr = RawDataFrameHeader::read(buf)?;
+			let len = frame_hdr.len as usize;
 			if buf.remaining() < len {
 				return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes remaining for data payload"))
 			}
 			let data = buf.copy_to_bytes(len);
-			self.q.set(sn, data);
+			self.q.set(frame_hdr.sn, data);
 			read_some = true;
 		}
 		Ok(read_some)
@@ -198,14 +262,6 @@ impl Receiver {
 
 	fn _decode_app_response(&mut self) -> IoResult<PacketPayload> {
 		panic!("not implemented")
-	}
-
-	fn _cheap_sync(&mut self, new_conn_id: ConnectionId, lowest_sn: SerialNumber) -> bool {
-		if self.q.len() == 0 {
-			return false
-		}
-		self.q.flush(lowest_sn);
-		true
 	}
 
 	// Process handshake
@@ -278,7 +334,8 @@ impl Receiver {
 	}
 
 	fn _resync(&mut self, lowest_sn: SerialNumber) {
-		self.pending.append(&mut self.q.flush(lowest_sn))
+		self.pending.append(&mut self.q.flush(lowest_sn));
+		self._update_sns()
 	}
 
 	fn process_packet<B: Buf>(&mut self, local_port: u16, remote_port: u16, buf: &mut B) -> IoResult<PacketResult> {
@@ -287,7 +344,8 @@ impl Receiver {
 			HandshakeResult::Synchronized => (),
 			HandshakeResult::PacketsRequired => {
 				// we need to send a packet and then wait for the reply -- so we pretend that this was an echo request :>
-				return Ok(PacketResult::EchoRequest)
+				// TODO: send echo response instead of dack, but the python stuff won’t like it
+				return Ok(PacketResult::PacketReceived)
 			},
 			HandshakeResult::Resynchronized{ lowest_sn } => {
 				// but we can still proceed, the next receive call will just return data from the flush queue if any
@@ -295,16 +353,24 @@ impl Receiver {
 			},
 		}
 
+		self.q.mark_unreceivable_up_to(hdr.min_avail_sn);
+		self.state.set_remote_rx_sns(hdr.max_recvd_sn, hdr.last_recvd_sn);
+
 		match hdr.type_ {
 			RawPacketType::Data => {
 				let read_some = self._process_data(buf)?;
 				if read_some {
+					self._update_sns();
 					Ok(PacketResult::PacketReceived)
 				} else {
 					Ok(PacketResult::Nop)
 				}
 			},
-			other => panic!("not implemented"),
+			RawPacketType::DataAck => {
+				// TODO: handle DACK frames; the header based acking is already done here
+				Ok(PacketResult::Nop)
+			},
+			other => panic!("not implemented: {:?}", other),
 		}
 	}
 
@@ -371,10 +437,84 @@ impl Receiver {
 	}
 }
 
+struct Transmitter {
+	state: Arc<SharedState>,
+	q: SendQueue,
+	mss: usize,
+}
+
+impl fmt::Debug for Transmitter {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct("Transmitter")
+			.finish()
+	}
+}
+
+impl Transmitter {
+	fn new(state: Arc<SharedState>, max_queue_size: usize) -> Transmitter {
+		Transmitter{
+			state,
+			q: SendQueue::new(max_queue_size, get_random_u16().into()),
+			mss: 1240,
+		}
+	}
+
+	fn _opportunistic_discard(&mut self) {
+		let (max_recvd_sn, last_recvd_sn) = self.state.remote_rx_sns();
+		self.q.discard_up_to_incl(max_recvd_sn);
+		self.q.discard(last_recvd_sn);
+	}
+
+	fn add_data_frame<T: Into<Bytes>>(&mut self, payload: T) {
+		self._opportunistic_discard();
+		self.q.push(payload);
+		self.state.set_tx_sn(self.q.min_sn());
+	}
+
+	async fn trigger_data_tx(&mut self, via: &UdpSocket) -> IoResult<()> {
+		self._opportunistic_discard();
+		self.state.set_tx_sn(self.q.min_sn());
+
+		if self.q.len() == 0 {
+			return Ok(())
+		}
+
+		let hdr = self.state.compose_header(RawPacketType::Data);
+		// most recent packet first, then we start with the oldest to increase chances of it getting delivered eventually
+		let mut backing = Vec::<u8>::new();
+		backing.resize(self.mss, 0u8);
+		let mut buf = &mut backing[..];
+		hdr.write(&mut buf)?;
+
+		let (newest_sn, ref newest_data) = self.q[self.q.len()-1];
+		buf.put(newest_data.clone());
+
+		for (frame_sn, frame_data) in self.q.iter() {
+			if *frame_sn == newest_sn {
+				break;
+			}
+			if frame_data.len() > buf.remaining_mut() {
+				continue;
+			}
+			buf.put(frame_data.clone());
+		}
+
+		let peer_address = self.state.peer_address();
+		let remaining = buf.remaining_mut();
+		let written = backing.len() - remaining;
+		let payload = &backing[..written];
+
+		via.send_to(payload, peer_address).await?;
+		Ok(())
+	}
+}
+
+#[derive(Debug)]
 pub struct Socket {
 	state: Arc<SharedState>,
 	inner: UdpSocket,
 	receiver: Receiver,
+	transmitter: Transmitter,
 }
 
 /// **Danger:** This protocol is vulnerable to trivial Denial of Service
@@ -386,12 +526,13 @@ pub struct Socket {
 /// to avoid loss of data when kernel buffers overflow (just like with normal
 /// UDP sockets).
 impl Socket {
-	pub fn new(conn: UdpSocket) -> Socket {
-		let state = Arc::new(SharedState::new());
+	pub fn new(conn: UdpSocket, initial_peer_addr: SocketAddr) -> Socket {
+		let state = Arc::new(SharedState::new(initial_peer_addr));
 		Socket{
 			state: state.clone(),
 			inner: conn,
-			receiver: Receiver::new(state, 256),
+			receiver: Receiver::new(state.clone(), 256),
+			transmitter: Transmitter::new(state, 256),
 		}
 	}
 
@@ -400,34 +541,20 @@ impl Socket {
 		// panic!("not implemented")
 	}
 
-	/// Enqueue a packet for transmission
-	async fn send_packet(&mut self, payload: PacketPayload) -> IoResult<()> {
-		Ok(())
-	}
-
-	/// This can be run in a backgronud task to retransmit un-ACK-ed data
-	/// frames even without any other transmission activity.
-	///
-	/// If data is being continuously transmitted, this task does nothing
-	/// extra.
-	async fn retransmitter() {
-
+	pub async fn send_data<T: Into<Bytes>>(&mut self, payload: T) -> IoResult<()> {
+		self.transmitter.add_data_frame(payload);
+		self.transmitter.trigger_data_tx(&self.inner).await
 	}
 }
 
 #[cfg(test)]
-mod tests_Receiver {
+mod tests {
 	use super::*;
-
-	fn test_frame(hdr: RawCommonHeader) -> BytesMut {
-		let mut buf = BytesMut::new();
-		hdr.write(&mut buf);
-		buf
-	}
+	use std::net::IpAddr;
 
 	fn test_receiver() -> (Arc<SharedState>, Receiver) {
-		let state = Arc::new(SharedState::new());
-		let mut r = Receiver::new(state.clone(), 16);
+		let state = Arc::new(SharedState::new(SocketAddr::new("0.0.0.0".parse::<IpAddr>().unwrap(), 7201u16)));
+		let r = Receiver::new(state.clone(), 16);
 		(state, r)
 	}
 
