@@ -309,6 +309,16 @@ impl FromStr for Box<dyn Evaluate> {
 							}))
 						}
 					},
+					"dB" => {
+						if stack.len() < 1 {
+							return Err(CompileError::StackUnderflow)
+						} else {
+							let value = stack.pop().unwrap();
+							stack.push(Box::new(func::ToDecibelOp{
+								value
+							}))
+						}
+					},
 					_ => return Err(CompileError::UndeclaredFunction(name)),
 				}
 			}

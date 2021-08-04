@@ -24,10 +24,10 @@ pub static LIGHT_CLEAR_COMPONENT: &'static str = "clear";
 
 pub struct Empty();
 
-pub trait ReadoutIterable<'x> {
+pub trait ReadoutIterable<'x, T: rtcifier::RTCifier> {
 	type GenIter: Iterator;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter;
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter;
 }
 
 impl Iterator for Empty {
@@ -54,15 +54,15 @@ impl<'x> DynSampleIterator<'x> {
 	}
 }
 
-pub struct DS18B20Readouts<'x> {
-	rtc: &'x mut rtcifier::RTCifier,
+pub struct DS18B20Readouts<'x, T: rtcifier::RTCifier> {
+	rtc: &'x mut T,
 	src: &'x frame::SbxDS18B20Message,
 	at: usize,
 }
 
-impl<'x> DS18B20Readouts<'x> {
-	fn from_msg(msg: &'x frame::SbxDS18B20Message, rtcifier: &'x mut rtcifier::RTCifier) -> DS18B20Readouts<'x> {
-		DS18B20Readouts{
+impl<'x, T: rtcifier::RTCifier> DS18B20Readouts<'x, T> {
+	fn from_msg(msg: &'x frame::SbxDS18B20Message, rtcifier: &'x mut T) -> Self {
+		Self{
 			rtc: rtcifier,
 			src: msg,
 			at: 0,
@@ -70,7 +70,7 @@ impl<'x> DS18B20Readouts<'x> {
 	}
 }
 
-impl<'x> Iterator for DS18B20Readouts<'x> {
+impl<'x, T: rtcifier::RTCifier> Iterator for DS18B20Readouts<'x, T> {
 	type Item = metric::Readout;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -102,10 +102,10 @@ impl<'x> Iterator for DS18B20Readouts<'x> {
 	}
 }
 
-impl<'x> ReadoutIterable<'x> for frame::SbxDS18B20Message {
-	type GenIter = DS18B20Readouts<'x>;
+impl<'x, T: rtcifier::RTCifier + 'static> ReadoutIterable<'x, T> for frame::SbxDS18B20Message {
+	type GenIter = DS18B20Readouts<'x, T>;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		DS18B20Readouts::from_msg(self, rtcifier)
 	}
 }
@@ -113,7 +113,7 @@ impl<'x> ReadoutIterable<'x> for frame::SbxDS18B20Message {
 pub struct BME280Readouts(Option<metric::Readout>);
 
 impl BME280Readouts {
-	fn from_msg(msg: &frame::SbxBME280Message, rtcifier: &mut rtcifier::RTCifier) -> BME280Readouts {
+	fn from_msg(msg: &frame::SbxBME280Message, rtcifier: &mut impl rtcifier::RTCifier) -> BME280Readouts {
 		let mut path: SmartString = "i2c-2/".into();
 		write!(path, "{:02x}", 0x76 | (msg.instance & 0x1)).expect("formatting");
 
@@ -157,23 +157,23 @@ impl Iterator for BME280Readouts {
 	}
 }
 
-impl<'x> ReadoutIterable<'x> for frame::SbxBME280Message {
+impl<'x, T: rtcifier::RTCifier> ReadoutIterable<'x, T> for frame::SbxBME280Message {
 	type GenIter = BME280Readouts;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		BME280Readouts::from_msg(self, rtcifier)
 	}
 }
 
-pub struct NoiseReadouts<'x> {
-	rtc: &'x mut rtcifier::RTCifier,
+pub struct NoiseReadouts<'x, T: rtcifier::RTCifier> {
+	rtc: &'x mut T,
 	src: &'x frame::SbxNoiseMessage,
 	at: usize,
 }
 
-impl<'x> NoiseReadouts<'x> {
-	fn from_msg(msg: &'x frame::SbxNoiseMessage, rtcifier: &'x mut rtcifier::RTCifier) -> NoiseReadouts<'x> {
-		NoiseReadouts{
+impl<'x, T: rtcifier::RTCifier> NoiseReadouts<'x, T> {
+	fn from_msg(msg: &'x frame::SbxNoiseMessage, rtcifier: &'x mut T) -> Self {
+		Self{
 			rtc: rtcifier,
 			src: msg,
 			at: 0,
@@ -181,7 +181,7 @@ impl<'x> NoiseReadouts<'x> {
 	}
 }
 
-impl<'x> Iterator for NoiseReadouts<'x> {
+impl<'x, T: rtcifier::RTCifier> Iterator for NoiseReadouts<'x, T> {
 	type Item = metric::Readout;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -217,23 +217,23 @@ impl<'x> Iterator for NoiseReadouts<'x> {
 	}
 }
 
-impl<'x> ReadoutIterable<'x> for frame::SbxNoiseMessage {
-	type GenIter = NoiseReadouts<'x>;
+impl<'x, T: rtcifier::RTCifier + 'static> ReadoutIterable<'x, T> for frame::SbxNoiseMessage {
+	type GenIter = NoiseReadouts<'x, T>;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		NoiseReadouts::from_msg(self, rtcifier)
 	}
 }
 
-pub struct LightReadouts<'x> {
-	rtc: &'x mut rtcifier::RTCifier,
+pub struct LightReadouts<'x, T: rtcifier::RTCifier> {
+	rtc: &'x mut T,
 	src: &'x frame::SbxLightMessage,
 	at: usize,
 }
 
-impl<'x> LightReadouts<'x> {
-	fn from_msg(msg: &'x frame::SbxLightMessage, rtcifier: &'x mut rtcifier::RTCifier) -> LightReadouts<'x> {
-		LightReadouts{
+impl<'x, T: rtcifier::RTCifier> LightReadouts<'x, T> {
+	fn from_msg(msg: &'x frame::SbxLightMessage, rtcifier: &'x mut T) -> Self {
+		Self{
 			rtc: rtcifier,
 			src: msg,
 			at: 0,
@@ -241,7 +241,7 @@ impl<'x> LightReadouts<'x> {
 	}
 }
 
-impl<'x> Iterator for LightReadouts<'x> {
+impl<'x, T: rtcifier::RTCifier> Iterator for LightReadouts<'x, T> {
 	type Item = metric::Readout;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -281,10 +281,10 @@ impl<'x> Iterator for LightReadouts<'x> {
 	}
 }
 
-impl<'x> ReadoutIterable<'x> for frame::SbxLightMessage {
-	type GenIter = LightReadouts<'x>;
+impl<'x, T: rtcifier::RTCifier + 'static> ReadoutIterable<'x, T> for frame::SbxLightMessage {
+	type GenIter = LightReadouts<'x, T>;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		LightReadouts::from_msg(self, rtcifier)
 	}
 }
@@ -304,7 +304,7 @@ pub struct StatusReadouts<'x> {
 }
 
 impl<'x> StatusReadouts<'x> {
-	fn from_msg(msg: &'x frame::SbxStatusMessage, rtcifier: &'x mut rtcifier::RTCifier) -> StatusReadouts<'x> {
+	fn from_msg(msg: &'x frame::SbxStatusMessage, rtcifier: &'x mut impl rtcifier::RTCifier) -> StatusReadouts<'x> {
 		StatusReadouts{
 			ts: rtcifier.map_to_rtc(msg.uptime),
 			src: msg,
@@ -501,10 +501,10 @@ impl<'x> Iterator for StatusReadouts<'x> {
 	}
 }
 
-impl<'x> ReadoutIterable<'x> for frame::SbxStatusMessage {
+impl<'x, T: rtcifier::RTCifier> ReadoutIterable<'x, T> for frame::SbxStatusMessage {
 	type GenIter = StatusReadouts<'x>;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		StatusReadouts::from_msg(self, rtcifier)
 	}
 }
@@ -516,9 +516,11 @@ mod test_ds18b20readouts {
 
 	use chrono::{Utc, TimeZone, DateTime, Duration};
 
-	fn new_rtc() -> (rtcifier::RTCifier, DateTime<Utc>) {
+	use crate::sbx::rtcifier::RTCifier;
+
+	fn new_rtc() -> (rtcifier::LinearRTC, DateTime<Utc>) {
 		let dt0 = Utc.ymd(2021, 7, 17).and_hms(16, 28, 0);
-		let mut rtc = rtcifier::RTCifier::default();
+		let mut rtc = rtcifier::LinearRTC::default();
 		rtc.align(dt0, 0);
 		(rtc, dt0)
 	}

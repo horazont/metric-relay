@@ -19,7 +19,7 @@ pub use frame::{
 	SbxStreamMessage,
 };
 
-pub use rtcifier::RTCifier;
+pub use rtcifier::{LinearRTC, RangeRTC, FilteredRTC, RTCifier};
 pub use generators::ReadoutIterable;
 
 #[derive(Debug, Clone)]
@@ -54,10 +54,10 @@ impl From<SbxNoiseMessage> for ReadoutMessage {
 	}
 }
 
-impl<'x> generators::ReadoutIterable<'x> for ReadoutMessage {
+impl<'x, T: rtcifier::RTCifier + 'static> generators::ReadoutIterable<'x, T> for ReadoutMessage {
 	type GenIter = generators::DynSampleIterator<'x>;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		match self {
 			Self::DS18B20(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
 			Self::BME280(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
@@ -107,10 +107,10 @@ impl StreamMessage {
 	}
 }
 
-impl<'x> generators::ReadoutIterable<'x> for StreamMessage {
+impl<'x, T: rtcifier::RTCifier> generators::ReadoutIterable<'x, T> for StreamMessage {
 	type GenIter = generators::DynSampleIterator<'x>;
 
-	fn readouts(&'x self, _rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, _rtcifier: &'x mut T) -> Self::GenIter {
 		Self::GenIter::wrap(generators::Empty())
 	}
 }
@@ -158,10 +158,10 @@ impl Message {
 	}
 }
 
-impl<'x> generators::ReadoutIterable<'x> for Message {
+impl<'x, T: rtcifier::RTCifier + 'static> generators::ReadoutIterable<'x, T> for Message {
 	type GenIter = generators::DynSampleIterator<'x>;
 
-	fn readouts(&'x self, rtcifier: &'x mut rtcifier::RTCifier) -> Self::GenIter {
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		match self {
 			Self::Status(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
 			Self::ReadoutData(msg) => msg.readouts(rtcifier),

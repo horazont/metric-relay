@@ -38,6 +38,9 @@ pub enum Unit {
 
 	// pressure
 	Pascal,
+
+	// raw decibel
+	DeciBel,
 }
 
 impl Unit {
@@ -51,6 +54,7 @@ impl Unit {
 			Self::MeterPerSqSecond => "m/s²",
 			Self::Tesla => "T",
 			Self::Pascal => "Pa",
+			Self::DeciBel => "dB",
 			Self::Total => "",
 			Self::Status => "",
 		}
@@ -69,6 +73,7 @@ impl FromStr for Unit {
 			"AU" => Ok(Self::Arbitrary),
 			"cnt" => Ok(Self::Total),
 			"Pa" => Ok(Self::Pascal),
+			"dB" => Ok(Self::DeciBel),
 			_ => Err("unknown unit"),
 		}
 	}
@@ -114,7 +119,7 @@ pub struct Sample {
 	pub value: Value,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StreamFormat {
 	/* I8,
 	U8, */
@@ -128,7 +133,7 @@ pub enum StreamFormat {
 	F64, */
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RawData {
 	/* I8(Vec<i8>),
 	U8(Vec<u8>), */
@@ -142,7 +147,15 @@ pub enum RawData {
 	F64(Vec<f64>), */
 }
 
-#[derive(Clone, Debug)]
+impl RawData {
+	pub fn len(&self) -> usize {
+		match self {
+			Self::I16(v) => v.len(),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StreamBlockData {
 	Compressed(StreamFormat, Bytes),
 	Uncompressed(StreamFormat, Bytes),
@@ -194,12 +207,12 @@ impl TryInto<Vec<i16>> for StreamBlockData {
 	}
 }
 
-#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamBlock {
-	t0: DateTime<Utc>,
-	path: DevicePath,
-	seq0: u16,
-	period: Duration,
-	scale: Value,
-	data: StreamBlockData,
+	pub t0: DateTime<Utc>,
+	pub path: DevicePath,
+	pub seq0: u16,
+	pub period: Duration,
+	pub scale: Value,
+	pub data: RawData,
 }

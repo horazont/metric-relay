@@ -8,7 +8,7 @@ use chrono::{Utc, TimeZone};
 
 use metric_relay::snurl;
 use metric_relay::sbx;
-use metric_relay::sbx::ReadoutIterable;
+use metric_relay::sbx::{ReadoutIterable, RTCifier};
 
 use structopt::StructOpt;
 
@@ -21,7 +21,7 @@ struct Opt {
 	dst_port: u16,
 }
 
-fn dump<R: Buf>(rtcifier: &mut sbx::RTCifier, aligned: &mut bool, b: &mut R) -> std::io::Result<()> {
+fn dump<R: Buf>(rtcifier: &mut sbx::LinearRTC, aligned: &mut bool, b: &mut R) -> std::io::Result<()> {
 	let hdr = sbx::EspMessageHeader::read(b)?;
 	println!("{:x?}", hdr);
 	match hdr.type_ {
@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let sock = snurl::Socket::new(raw_sock, net::SocketAddr::new("255.255.255.255".parse::<net::IpAddr>().unwrap(), opt.dst_port));
 	let mut ep = snurl::Endpoint::new(sock);
 
-	let mut rtcifier = sbx::RTCifier::default();
+	let mut rtcifier = sbx::LinearRTC::default();
 	let mut aligned = false;
 
 	loop {

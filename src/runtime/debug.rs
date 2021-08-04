@@ -74,7 +74,7 @@ impl DebugStdoutSink {
 }
 
 impl traits::Sink for DebugStdoutSink {
-	fn attach_source<'x>(&mut self, src: &'x dyn traits::Source) {
+	fn attach_source<'x>(&self, src: &'x dyn traits::Source) {
 		debug!("connecting debug sink");
 		self.samples.attach(src.subscribe_to_samples());
 		self.stream.attach(src.subscribe_to_streams());

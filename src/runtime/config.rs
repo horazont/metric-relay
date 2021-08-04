@@ -17,6 +17,9 @@ use super::sbx::SBXSource;
 use super::debug;
 use super::filter;
 use super::relay;
+use super::router;
+use super::influxdb;
+use super::pubsub;
 
 use crate::metric;
 use crate::script;
@@ -24,19 +27,27 @@ use crate::snurl;
 
 #[derive(Debug)]
 pub enum BuildError {
-	UndefinedSink{which: String, at: String},
-	UndefinedSource{which: String, at: String},
+	UndefinedSink{which: String},
+	NotASink{which: String},
+	UndefinedSource{which: String},
+	NotASource{which: String},
 	Other(Box<dyn Error>),
 }
 
 impl fmt::Display for BuildError {
 	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::UndefinedSink{which, at} => {
-				write!(f, "undefined sink {:?} {}", which, at)
+			Self::UndefinedSink{which} => {
+				write!(f, "undefined sink {:?}", which)
 			},
-			Self::UndefinedSource{which, at} => {
-				write!(f, "undefined sink {:?} {}", which, at)
+			Self::NotASink{which} => {
+				write!(f, "{:?} is not a sink", which)
+			},
+			Self::UndefinedSource{which} => {
+				write!(f, "undefined source {:?}", which)
+			},
+			Self::NotASource{which} => {
+				write!(f, "{:?} is not a source", which)
 			},
 			Self::Other(e) => write!(f, "{:?}", e),
 		}
@@ -156,7 +167,7 @@ pub struct RandomComponent {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "class")]
-pub enum Source {
+pub enum Node {
 	SBX{
 		path_prefix: String,
 		transport: SNURLConfig,
@@ -167,13 +178,32 @@ pub enum Source {
 		interval: f64,
 		components: HashMap<String, RandomComponent>,
 	},
-	Relay{
+	Listen{
 		listen_address: String,
+	},
+	Connect{
+		peer_address: String,
+	},
+	DebugStdout,
+	Route{
+		filters: Vec<Filter>,
+	},
+	InfluxDB{
+		api_url: String,
+		auth: crate::influxdb::Auth,
+		database: String,
+		retention_policy: Option<String>,
+		precision: crate::influxdb::Precision,
+	},
+	PubSub{
+		api_url: String,
+		node_template: String,
+		override_host: Option<String>,
 	},
 }
 
-impl Source {
-	pub fn build(&self) -> Result<Box<dyn traits::Source>, BuildError> {
+impl Node {
+	pub fn build(&self) -> Result<traits::Node, BuildError> {
 		match self {
 			Self::SBX{path_prefix, transport} => {
 				let raw_sock = match net::UdpSocket::bind(net::SocketAddr::new(transport.local_address, transport.local_port)) {
@@ -189,7 +219,7 @@ impl Source {
 					net::SocketAddr::new(transport.remote_address, transport.remote_port),
 				);
 				let ep = snurl::Endpoint::new(sock);
-				Ok(Box::new(SBXSource::new(ep, path_prefix.clone())))
+				Ok(traits::Node::from_source(SBXSource::new(ep, path_prefix.clone())))
 			},
 			Self::Random{device_type, instance, interval, components} => {
 				let mut components_out: metric::OrderedVec<SmartString, debug::RandomComponent> = metric::OrderedVec::new();
@@ -200,44 +230,55 @@ impl Source {
 						max: v.max,
 					});
 				};
-				Ok(Box::new(debug::RandomSource::new(
+				Ok(traits::Node::from_source(debug::RandomSource::new(
 					time::Duration::from_secs_f64(*interval),
 					instance.into(),
 					device_type.into(),
 					components_out,
 				)))
 			},
-			Self::Relay{listen_address} => {
+			Self::Listen{listen_address} => {
 				let raw_sock = match net::TcpListener::bind(&listen_address[..]) {
 					Err(e) => return Err(BuildError::Other(Box::new(e))),
 					Ok(s) => s,
 				};
 				raw_sock.set_nonblocking(true).expect("setting the tcp socket to be non-blocking");
-
-				Ok(Box::new(relay::RelaySource::new(
+				Ok(traits::Node::from_source(relay::RelaySource::new(
 					tokio::net::TcpListener::from_std(raw_sock).expect("conversion to tokio socket"),
 				)))
 			},
-		}
-	}
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "class")]
-pub enum Sink {
-	DebugStdout,
-	Relay{
-		peer_address: String,
-	},
-}
-impl Sink {
-	pub fn build(&self) -> Result<Box<dyn traits::Sink>, BuildError> {
-		match self {
-			Self::DebugStdout => {
-				Ok(Box::new(debug::DebugStdoutSink::new()))
+			Self::Connect{peer_address} => {
+				Ok(traits::Node::from_sink(relay::RelaySink::new(
+					peer_address.clone(),
+				)))
 			},
-			Self::Relay{peer_address} => {
-				Ok(Box::new(relay::RelaySink::new(peer_address.clone())))
+			Self::DebugStdout => {
+				Ok(traits::Node::from_sink(debug::DebugStdoutSink::new()))
+			},
+			Self::Route{filters} => {
+				let mut built_filters = Vec::new();
+				for filter in filters.iter() {
+					built_filters.push(filter.build()?);
+				}
+				Ok(traits::Node::from(router::SampleRouter::new(
+					built_filters,
+				)))
+			},
+			Self::InfluxDB{api_url, auth, database, retention_policy, precision} => {
+				Ok(traits::Node::from_sink(influxdb::InfluxDBSink::new(
+					api_url.clone(),
+					auth.clone(),
+					database.clone(),
+					retention_policy.clone(),
+					*precision,
+				)))
+			},
+			Self::PubSub{api_url, node_template, override_host} => {
+				Ok(traits::Node::from_sink(pubsub::PubSubSink::new(
+					api_url.clone(),
+					node_template.clone(),
+					override_host.clone(),
+				)))
 			},
 		}
 	}
@@ -339,8 +380,13 @@ pub struct Route {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Link {
+	pub source: String,
+	pub sink: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-	pub sources: HashMap<String, Source>,
-	pub sinks: HashMap<String, Sink>,
-	pub routes: Vec<Route>,
+	pub node: HashMap<String, Node>,
+	pub link: Vec<Link>,
 }

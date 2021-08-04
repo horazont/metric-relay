@@ -11,7 +11,7 @@ use bytes::{Buf};
 
 use crate::snurl;
 use crate::sbx;
-use crate::sbx::ReadoutIterable;
+use crate::sbx::{ReadoutIterable, RTCifier};
 
 use super::traits;
 use super::payload;
@@ -30,7 +30,7 @@ struct SBXSourceWorker {
 	#[allow(dead_code)]
 	stream_sender: broadcast::Sender<payload::Stream>,
 	close_guard: oneshot::Receiver<()>,
-	rtcifier: sbx::RTCifier,
+	rtcifier: sbx::RangeRTC,
 	aligned: bool,
 }
 
@@ -150,7 +150,7 @@ impl SBXSource {
 				sample_sender,
 				stream_sender,
 				close_guard,
-				rtcifier: sbx::RTCifier::default(),
+				rtcifier: sbx::RangeRTC::default(),
 				aligned: false,
 			};
 			loop {
