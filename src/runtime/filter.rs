@@ -12,7 +12,7 @@ use super::payload;
 
 
 pub trait Filter: Send + Sync {
-	fn process_readout(&self, input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, input: payload::Readout) -> Option<payload::Readout> {
 		Some(input)
 	}
 
@@ -65,7 +65,7 @@ impl SelectByPath {
 }
 
 impl Filter for SelectByPath {
-	fn process_readout(&self, input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, input: payload::Readout) -> Option<payload::Readout> {
 		match self.matches_readout(&input) {
 			true => Some(input),
 			false => None,
@@ -104,7 +104,7 @@ impl script::Namespace for metric::OrderedVec<SmartString, metric::Value> {
 }
 
 impl Filter for Calc {
-	fn process_readout(&self, mut input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
 		if !self.predicate.matches_readout(&input) {
 			trace!("calc skipping {:?} because it was rejected by the predicate", input);
 			return Some(input)
@@ -154,7 +154,7 @@ impl<'x> script::Namespace for SingletonNamespace<'x> {
 }
 
 impl Filter for Map {
-	fn process_readout(&self, mut input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
 		if !self.predicate.matches_readout(&input) {
 			trace!("map skipping {:?} because it was rejected by the predicate", input);
 			return Some(input)
@@ -197,7 +197,7 @@ pub struct DropComponent {
 }
 
 impl Filter for DropComponent {
-	fn process_readout(&self, mut input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
 		if !self.predicate.matches_readout(&input) {
 			return Some(input)
 		}
@@ -216,7 +216,7 @@ pub struct MapInstance {
 }
 
 impl Filter for MapInstance {
-	fn process_readout(&self, mut input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
 		if !self.predicate.matches_readout(&input) {
 			return Some(input)
 		}
@@ -253,7 +253,7 @@ pub struct MapDeviceType {
 }
 
 impl Filter for MapDeviceType {
-	fn process_readout(&self, mut input: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
 		if !self.predicate.matches_readout(&input) {
 			return Some(input)
 		}
@@ -285,7 +285,7 @@ impl Filter for MapDeviceType {
 }
 
 impl Filter for Vec<Box<dyn Filter>> {
-	fn process_readout(&self, mut item: payload::Sample) -> Option<payload::Sample> {
+	fn process_readout(&self, mut item: payload::Readout) -> Option<payload::Readout> {
 		for filter in self.iter() {
 			item = match filter.process_readout(item) {
 				Some(item) => item,

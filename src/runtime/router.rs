@@ -7,12 +7,27 @@ use tokio::sync::mpsc;
 
 use super::payload;
 use super::adapter::Serializer;
-use super::traits::{Source, Sink, null_receiver};
+use super::traits::{Source, Sink};
 use super::filter::Filter;
 
 
 struct RouterWorker {
 	filters: Vec<Box<dyn Filter>>,
+}
+
+fn process_readouts(filters: &Vec<Box<dyn Filter>>, readouts: &mut payload::Sample) {
+	let mut i = 0;
+	while i < readouts.len() {
+		match filters.process_readout(readouts[i].clone()) {
+			Some(new) => {
+				readouts[i] = new;
+				i += 1;
+			},
+			None => {
+				readouts.remove(i);
+			},
+		};
+	}
 }
 
 impl RouterWorker {
@@ -40,19 +55,22 @@ impl RouterWorker {
 			mut source: mpsc::Receiver<payload::Sample>,
 			sink: broadcast::Sender<payload::Sample>) {
 		loop {
-			let mut item = match source.recv().await {
+			let mut readouts = match source.recv().await {
 				Some(item) => item,
 				// channel closed, which means that the serializer dropped, which means that the router itself was dropped, which means we can also just go home now.
 				None => return,
 			};
-			item = match self.filters.process_readout(item) {
-				Some(new) => new,
-				None => {
-					trace!("readout got dropped by filter");
-					continue;
-				},
-			};
-			match sink.send(item) {
+			if readouts.len() == 0 {
+				continue;
+			}
+
+			process_readouts(&self.filters, &mut readouts);
+			if readouts.len() == 0 {
+				trace!("all readouts got dropped by filter");
+				continue;
+			}
+
+			match sink.send(readouts) {
 				Ok(_) => (),
 				Err(_) => {
 					warn!("no receivers on route, dropping sample");

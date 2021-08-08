@@ -3,7 +3,7 @@ use std::ops::Deref;
 
 use bytes::{Bytes, BytesMut};
 
-use super::serial::SerialNumber;
+use crate::serial::SerialNumber;
 use super::frame::{DataFrame, RawDataFrameHeader};
 
 #[derive(Debug, Clone)]

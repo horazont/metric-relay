@@ -4,12 +4,14 @@ use smartstring::alias::{String as SmartString};
 
 use serde_derive::{Serialize, Deserialize};
 
+use enum_map::{Enum};
+
 use chrono::{DateTime, Utc};
 
 use crate::metric;
 
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
 pub enum Precision {
 	Nanoseconds,
 	Microseconds,

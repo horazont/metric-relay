@@ -34,7 +34,7 @@ use log::{trace};
 use chrono::{Duration, DateTime, Utc, DurationRound};
 
 use crate::metric;
-use crate::snurl;
+use crate::serial::SerialNumber;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WriteError {
@@ -105,7 +105,7 @@ pub trait StreamBuffer {
 #[derive(Debug, Clone)]
 struct BufferedBlock {
 	t0: DateTime<Utc>,
-	seq0: snurl::SerialNumber,
+	seq0: SerialNumber,
 	path: metric::DevicePath,
 	period: Duration,
 	scale: metric::Value,
@@ -133,7 +133,7 @@ pub struct InMemoryBuffer {
 	next_block: Option<BufferedBlock>,
 	// reference timestamp and sequence number if available. this is stored when a block is created and it points to the beginning of the earliest block where we can collect data
 	// this allows to match based on the sequence number if the timestamps are not off too far, which means that we can avoid gaps if the clock is drifting slightly
-	reference: Option<(DateTime<Utc>, snurl::SerialNumber)>,
+	reference: Option<(DateTime<Utc>, SerialNumber)>,
 }
 
 impl InMemoryBuffer {
@@ -156,7 +156,7 @@ impl InMemoryBuffer {
 	///
 	/// If no reference is available or if it is too far off, the timestamp
 	/// and sequence number of the incoming blocks metadata will be used.
-	fn match_reference(&mut self, t0: DateTime<Utc>, seq0: snurl::SerialNumber, period: Duration) -> (DateTime<Utc>, DateTime<Utc>, snurl::SerialNumber) {
+	fn match_reference(&mut self, t0: DateTime<Utc>, seq0: SerialNumber, period: Duration) -> (DateTime<Utc>, DateTime<Utc>, SerialNumber) {
 		let in_block_t0 = t0.duration_trunc(period).unwrap();
 		let out_block_t0 = in_block_t0.duration_trunc(self.slice).unwrap();
 		let time_based_out_block_seq0 = seq0 - (
@@ -221,7 +221,7 @@ impl StreamBuffer for InMemoryBuffer {
 			samples_per_block as usize
 		};
 
-		let in_block_seq0: snurl::SerialNumber = block.seq0.into();
+		let in_block_seq0: SerialNumber = block.seq0.into();
 		let (_, out_block_t0, out_block_seq0) = self.match_reference(block.t0, in_block_seq0, period);
 
 		let next_block = match self.next_block.as_mut() {

@@ -85,16 +85,16 @@ impl SBXSourceWorker {
 	}
 
 	fn process_ready(&mut self, msg: sbx::Message) {
-		let mut dropped = 0usize;
-		for mut readout in msg.readouts(&mut self.rtcifier) {
-			readout.path.instance.insert_str(0, &self.path_prefix[..]);
-			match self.sample_sink.send(Arc::new(readout)) {
-				Ok(_) => (),
-				Err(_) => dropped += 1,
-			}
-		}
-		if dropped > 0 {
-			warn!("dropped {} readouts because of no receivers", dropped);
+		let prefix = &self.path_prefix;
+		let readouts = msg.readouts(&mut self.rtcifier).map(|mut x| {
+			x.path.instance.insert_str(0, prefix);
+			Arc::new(x)
+		}).collect();
+		match self.sample_sink.send(readouts) {
+			Ok(_) => (),
+			Err(broadcast::error::SendError(readouts)) => {
+				warn!("dropped {} readouts because of no receivers", readouts.len());
+			},
 		}
 
 		match msg {

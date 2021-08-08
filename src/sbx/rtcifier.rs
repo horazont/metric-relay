@@ -617,7 +617,7 @@ fn ring_median(vs: &[i64]) -> Option<i64> {
 	let index = len / 2;
 	let (ioffset, voffset) = match vs.binary_search(&-500) {
 		// we have a contiguous cluster of numbers, no wraparound
-		Ok(i) => (0, 0),
+		Ok(_) => (0, 0),
 		Err(i) if i == 0 => (0, 0),
 		Err(i) if i == len => (0, 0),
 		Err(i) => {
@@ -941,6 +941,7 @@ impl RangeRTCLioriState {
 		}
 	}
 
+	#[allow(dead_code)]
 	fn shift(&mut self, offset: i64) {
 		match self.rolling_average {
 			Some(previous) => {
@@ -953,6 +954,7 @@ impl RangeRTCLioriState {
 		}
 	}
 
+	#[allow(dead_code)]
 	fn get_offset_estimate(&self) -> i64 {
 		self.rolling_average.unwrap()
 	}
@@ -984,6 +986,7 @@ impl RangeRTCLiori {
 		*self.max_hist.iter().max().unwrap()
 	}
 
+	#[allow(dead_code)]
 	fn get_raw_offset_estimate(&self) -> i64 {
 		let min = self.get_min_estimate();
 		let max = self.get_max_estimate();

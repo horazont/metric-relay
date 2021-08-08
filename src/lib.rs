@@ -1,10 +1,16 @@
+pub mod serial;
+#[cfg(feature = "sbx")]
 pub mod snurl;
+#[cfg(feature = "sbx")]
 pub mod sbx;
 pub mod metric;
 pub mod runtime;
 pub mod script;
 pub mod meteo;
+#[cfg(feature = "relay")]
 pub mod relay;
+#[cfg(feature = "influxdb")]
 pub mod influxdb;
+#[cfg(feature = "pubsub")]
 pub mod pubsub;
 pub mod stream;

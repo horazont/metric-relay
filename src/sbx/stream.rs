@@ -8,10 +8,9 @@ use chrono::{DateTime, Utc, Duration};
 
 use bytes::{Bytes, Buf};
 
-use enum_map::{Enum, EnumMap};
+use enum_map::{Enum};
 
 use crate::metric;
-use crate::snurl;
 use crate::stream;
 
 use super::frame;
@@ -237,7 +236,7 @@ impl<T: stream::StreamBuffer + Sync + Send + 'static> StreamDecoder<T> {
 
 	pub fn decode<'m>(&mut self, kind: StreamKind, message: &'m frame::SbxStreamMessage) -> io::Result<()> {
 		let mut samples = Vec::new();
-		let mut iter = Decompress::new(message.avg, message.coded.clone())?;
+		let iter = Decompress::new(message.avg, message.coded.clone())?;
 		samples.reserve(iter.size_hint().1.unwrap());
 		samples.extend(iter);
 		samples.shrink_to_fit();

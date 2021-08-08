@@ -82,7 +82,6 @@ pub struct StreamMessage {
 
 impl StreamMessage {
 	pub fn build(msgtype: SbxMessageType, data: SbxStreamMessage) -> StreamMessage {
-		use SbxMessageType::*;
 		let kind: stream::StreamKind = msgtype.try_into().expect("stream message kind");
 		StreamMessage{
 			kind,

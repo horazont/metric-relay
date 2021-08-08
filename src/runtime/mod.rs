@@ -3,15 +3,22 @@ use std::collections::HashMap;
 mod payload;
 mod traits;
 mod config;
+#[cfg(feature = "sbx")]
 mod sbx;
 mod adapter;
+#[cfg(feature = "debug")]
 mod debug;
 mod filter;
+#[cfg(feature = "relay")]
 mod relay;
 mod router;
+#[cfg(feature = "influxdb")]
 mod influxdb;
+#[cfg(feature = "pubsub")]
 mod pubsub;
+#[cfg(feature = "fft")]
 mod fft;
+#[cfg(feature = "summary")]
 mod summary;
 
 pub use traits::{Source, Sink, Node};

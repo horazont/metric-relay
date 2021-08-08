@@ -1,14 +1,13 @@
 use std::fmt;
-use std::io;
+use std::sync::Arc;
+
+use log::trace;
 
 use reqwest;
 use base64;
 use bytes::{BytesMut, BufMut};
-use chrono::{DateTime, Utc};
 
 use serde_derive::{Serialize, Deserialize};
-
-use crate::metric;
 
 mod readout;
 mod filter;
@@ -84,14 +83,15 @@ impl Client {
 			database: &'_ str,
 			retention_policy: Option<&'_ str>,
 			auth: Option<&'_ Auth>,
-			readout: &Readout,
+			precision: Precision,
+			readouts: &[Arc<Readout>],
 			) -> Result<(), Error>
 	{
 		let req = self.client.post(self.write_url.clone());
 		let req = auth.unwrap_or_else(|| { &self.auth }).apply(req);
 		let req = req.query(&[
 			("db", database),
-			("precision", readout.precision.value()),
+			("precision", precision.value()),
 		]);
 		let req = match retention_policy {
 			Some(policy) => req.query(&[("rp", policy)]),
@@ -100,7 +100,13 @@ impl Client {
 
 		let body = BytesMut::new();
 		let mut body_writer = body.writer();
-		readout.write(&mut body_writer).unwrap();  // BytesMut is infallible
+		trace!("serializing {} readouts", readouts.len());
+		for readout in readouts {
+			if precision != readout.precision {
+				panic!("inconsistent precisions in readouts!")
+			}
+			readout.write(&mut body_writer).unwrap();  // BytesMut is infallible
+		}
 
 		let body = body_writer.into_inner();
 		let req = req.body(body.freeze());

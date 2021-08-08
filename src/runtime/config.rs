@@ -5,7 +5,8 @@ use std::fmt;
 use std::error::Error;
 use std::net;
 use std::ops::{Deref, DerefMut};
-use core::time;
+#[cfg(feature = "debug")]
+use std::time;
 
 use serde::{de, Deserializer, Deserialize as DeserializeTrait};
 use serde_derive::{Deserialize};
@@ -13,19 +14,28 @@ use serde_derive::{Deserialize};
 use glob;
 
 use super::traits;
+#[cfg(feature = "sbx")]
 use super::sbx::SBXSource;
+#[cfg(feature = "debug")]
 use super::debug;
 use super::filter;
+#[cfg(feature = "relay")]
 use super::relay;
 use super::router;
+#[cfg(feature = "influxdb")]
 use super::influxdb;
+#[cfg(feature = "pubsub")]
 use super::pubsub;
+#[cfg(feature = "fft")]
 use super::fft;
+#[cfg(feature = "summary")]
 use super::summary;
 
+#[cfg(feature = "debug")]
 use crate::stream;
 use crate::metric;
 use crate::script;
+#[cfg(feature = "sbx")]
 use crate::snurl;
 
 #[derive(Debug)]
@@ -34,6 +44,7 @@ pub enum BuildError {
 	NotASink{which: String},
 	UndefinedSource{which: String},
 	NotASource{which: String},
+	FeatureNotAvailable{which: String, feature_name: &'static str},
 	Other(Box<dyn Error>),
 }
 
@@ -51,6 +62,9 @@ impl fmt::Display for BuildError {
 			},
 			Self::NotASource{which} => {
 				write!(f, "{:?} is not a source", which)
+			},
+			Self::FeatureNotAvailable{which, feature_name} => {
+				write!(f, "{:?} is only available if built with the {} feature", which, feature_name)
 			},
 			Self::Other(e) => write!(f, "{:?}", e),
 		}
@@ -177,6 +191,7 @@ pub enum StreamBufferConfig {
 }
 
 impl StreamBufferConfig {
+	#[cfg(feature = "debug")]
 	fn build(&self) -> Box<dyn stream::StreamBuffer + Send + Sync + 'static> {
 		match self {
 			Self::InMemory{slice} => {
@@ -188,6 +203,7 @@ impl StreamBufferConfig {
 	}
 }
 
+#[cfg(feature = "influxdb")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct InfluxDBPredicate {
 	match_measurement: Option<PatternWrap>,
@@ -195,6 +211,7 @@ pub struct InfluxDBPredicate {
 	invert: bool,
 }
 
+#[cfg(feature = "influxdb")]
 impl InfluxDBPredicate {
 	fn build(&self) -> crate::influxdb::Select {
 		crate::influxdb::Select{
@@ -206,6 +223,7 @@ impl InfluxDBPredicate {
 	}
 }
 
+#[cfg(feature = "influxdb")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum InfluxDBMapping {
@@ -216,6 +234,7 @@ pub enum InfluxDBMapping {
 	},
 }
 
+#[cfg(feature = "influxdb")]
 impl InfluxDBMapping {
 	fn build(&self) -> Result<Box<dyn crate::influxdb::Filter>, BuildError> {
 		match self {
@@ -255,6 +274,7 @@ pub enum Node {
 	Route{
 		filters: Vec<Filter>,
 	},
+	#[cfg(feature = "influxdb")]
 	InfluxDB{
 		api_url: String,
 		auth: crate::influxdb::Auth,
@@ -290,54 +310,108 @@ impl Node {
 	pub fn build(&self) -> Result<traits::Node, BuildError> {
 		match self {
 			Self::SBX{path_prefix, transport} => {
-				let raw_sock = match net::UdpSocket::bind(net::SocketAddr::new(transport.local_address, transport.local_port)) {
-					Err(e) => {
-						return Err(BuildError::Other(Box::new(e)))
-					},
-					Ok(s) => s,
-				};
+				#[cfg(feature = "sbx")]
+				{
+					let raw_sock = match net::UdpSocket::bind(net::SocketAddr::new(transport.local_address, transport.local_port)) {
+						Err(e) => {
+							return Err(BuildError::Other(Box::new(e)))
+						},
+						Ok(s) => s,
+					};
 
-				raw_sock.set_nonblocking(true).expect("setting the udp socket to be non-blocking");
-				let sock = snurl::Socket::new(
-					tokio::net::UdpSocket::from_std(raw_sock).expect("conversion to tokio socket"),
-					net::SocketAddr::new(transport.remote_address, transport.remote_port),
-				);
-				let ep = snurl::Endpoint::new(sock);
-				Ok(traits::Node::from_source(SBXSource::new(ep, path_prefix.clone())))
+					raw_sock.set_nonblocking(true).expect("setting the udp socket to be non-blocking");
+					let sock = snurl::Socket::new(
+						tokio::net::UdpSocket::from_std(raw_sock).expect("conversion to tokio socket"),
+						net::SocketAddr::new(transport.remote_address, transport.remote_port),
+					);
+					let ep = snurl::Endpoint::new(sock);
+					Ok(traits::Node::from_source(SBXSource::new(ep, path_prefix.clone())))
+				}
+				#[cfg(not(feature = "sbx"))]
+				{
+					let _ = (path_prefix, transport);
+					Err(BuildError::FeatureNotAvailable{
+						which: "SBXSource node".into(),
+						feature_name: "sbx",
+					})
+				}
 			},
 			Self::Random{device_type, instance, interval, components} => {
-				let mut components_out: metric::OrderedVec<SmartString, debug::RandomComponent> = metric::OrderedVec::new();
-				for (k, v) in components.iter() {
-					components_out.insert(k.into(), debug::RandomComponent{
-						unit: v.unit.0.clone(),
-						min: v.min,
-						max: v.max,
-					});
-				};
-				Ok(traits::Node::from_source(debug::RandomSource::new(
-					time::Duration::from_secs_f64(*interval),
-					instance.into(),
-					device_type.into(),
-					components_out,
-				)))
+				#[cfg(feature = "debug")]
+				{
+					let mut components_out: metric::OrderedVec<SmartString, debug::RandomComponent> = metric::OrderedVec::new();
+					for (k, v) in components.iter() {
+						components_out.insert(k.into(), debug::RandomComponent{
+							unit: v.unit.0.clone(),
+							min: v.min,
+							max: v.max,
+						});
+					};
+					Ok(traits::Node::from_source(debug::RandomSource::new(
+						time::Duration::from_secs_f64(*interval),
+						instance.into(),
+						device_type.into(),
+						components_out,
+					)))
+				}
+				#[cfg(not(feature = "debug"))]
+				{
+					let _ = (device_type, instance, interval, components);
+					Err(BuildError::FeatureNotAvailable{
+						which: "Random node".into(),
+						feature_name: "debug",
+					})
+				}
 			},
 			Self::Listen{listen_address} => {
-				let raw_sock = match net::TcpListener::bind(&listen_address[..]) {
-					Err(e) => return Err(BuildError::Other(Box::new(e))),
-					Ok(s) => s,
-				};
-				raw_sock.set_nonblocking(true).expect("setting the tcp socket to be non-blocking");
-				Ok(traits::Node::from_source(relay::RelaySource::new(
-					tokio::net::TcpListener::from_std(raw_sock).expect("conversion to tokio socket"),
-				)))
+				#[cfg(feature = "relay")]
+				{
+					let raw_sock = match net::TcpListener::bind(&listen_address[..]) {
+						Err(e) => return Err(BuildError::Other(Box::new(e))),
+						Ok(s) => s,
+					};
+					raw_sock.set_nonblocking(true).expect("setting the tcp socket to be non-blocking");
+					Ok(traits::Node::from_source(relay::RelaySource::new(
+						tokio::net::TcpListener::from_std(raw_sock).expect("conversion to tokio socket"),
+					)))
+				}
+				#[cfg(not(feature = "relay"))]
+				{
+					let _ = listen_address;
+					Err(BuildError::FeatureNotAvailable{
+						which: "Listen node".into(),
+						feature_name: "relay",
+					})
+				}
 			},
 			Self::Connect{peer_address} => {
-				Ok(traits::Node::from_sink(relay::RelaySink::new(
-					peer_address.clone(),
-				)))
+				#[cfg(feature = "relay")]
+				{
+					Ok(traits::Node::from_sink(relay::RelaySink::new(
+						peer_address.clone(),
+					)))
+				}
+				#[cfg(not(feature = "relay"))]
+				{
+					let _ = peer_address;
+					Err(BuildError::FeatureNotAvailable{
+						which: "Listen node".into(),
+						feature_name: "relay",
+					})
+				}
 			},
 			Self::DebugStdout => {
-				Ok(traits::Node::from_sink(debug::DebugStdoutSink::new()))
+				#[cfg(feature = "debug")]
+				{
+					Ok(traits::Node::from_sink(debug::DebugStdoutSink::new()))
+				}
+				#[cfg(not(feature = "debug"))]
+				{
+					Err(BuildError::FeatureNotAvailable{
+						which: "DebugStdout node".into(),
+						feature_name: "debug",
+					})
+				}
 			},
 			Self::Route{filters} => {
 				let mut built_filters = Vec::new();
@@ -348,6 +422,7 @@ impl Node {
 					built_filters,
 				)))
 			},
+			#[cfg(feature = "influxdb")]
 			Self::InfluxDB{api_url, auth, database, retention_policy, precision, mapping} => {
 				let mut built_filters = Vec::new();
 				for filter in mapping.iter() {
@@ -363,38 +438,82 @@ impl Node {
 				)))
 			},
 			Self::PubSub{api_url, node_template, override_host} => {
-				Ok(traits::Node::from_sink(pubsub::PubSubSink::new(
-					api_url.clone(),
-					node_template.clone(),
-					override_host.clone(),
-				)))
+				#[cfg(feature = "pubsub")]
+				{
+					Ok(traits::Node::from_sink(pubsub::PubSubSink::new(
+						api_url.clone(),
+						node_template.clone(),
+						override_host.clone(),
+					)))
+				}
+				#[cfg(not(feature = "pubsub"))]
+				{
+					let _ = (api_url, node_template, override_host);
+					Err(BuildError::FeatureNotAvailable{
+						which: "PubSub node".into(),
+						feature_name: "pubsub",
+					})
+				}
 			},
 			Self::Sine{nsamples, sample_period, instance, device_type, scale, period, phase, buffer} => {
-				Ok(traits::Node::from_source(debug::SineSource::new(
-					*nsamples,
-					time::Duration::from_millis(*sample_period as u64),
-					metric::DevicePath{
-						instance: instance.into(),
-						device_type: device_type.into(),
-					},
-					metric::Value{
-						unit: metric::Unit::Arbitrary,
-						magnitude: *scale,
-					},
-					*period,
-					*phase,
-					buffer.build(),
-				)))
+				#[cfg(feature = "debug")]
+				{
+					Ok(traits::Node::from_source(debug::SineSource::new(
+						*nsamples,
+						time::Duration::from_millis(*sample_period as u64),
+						metric::DevicePath{
+							instance: instance.into(),
+							device_type: device_type.into(),
+						},
+						metric::Value{
+							unit: metric::Unit::Arbitrary,
+							magnitude: *scale,
+						},
+						*period,
+						*phase,
+						buffer.build(),
+					)))
+				}
+				#[cfg(not(feature = "debug"))]
+				{
+					let _ = (nsamples, sample_period, instance, device_type, scale, period, phase, buffer);
+					Err(BuildError::FeatureNotAvailable{
+						which: "Sine node".into(),
+						feature_name: "debug",
+					})
+				}
 			},
 			Self::FFT{size} => {
-				Ok(traits::Node::from(fft::Fft::new(
-					*size,
-				)))
+				#[cfg(feature = "fft")]
+				{
+					Ok(traits::Node::from(fft::Fft::new(
+						*size,
+					)))
+				}
+				#[cfg(not(feature = "fft"))]
+				{
+					let _ = size;
+					Err(BuildError::FeatureNotAvailable{
+						which: "FFT node".into(),
+						feature_name: "fft",
+					})
+				}
 			},
 			Self::Summary{size} => {
-				Ok(traits::Node::from(summary::Summary::new(
-					*size,
-				)))
+				#[cfg(feature = "summary")]
+				{
+					Ok(traits::Node::from(summary::Summary::new(
+						*size,
+					)))
+				}
+				#[cfg(not(feature = "summary"))]
+				{
+					let _ = size;
+					Err(BuildError::FeatureNotAvailable{
+						which: "Summary node".into(),
+						feature_name: "summary",
+					})
+				}
 			},
 		}
 	}

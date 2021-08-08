@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use bytes::Bytes;
-use super::serial::SerialNumber;
+use crate::serial::SerialNumber;
 use super::frame::DataFrame;
 
 #[derive(Debug, Clone)]

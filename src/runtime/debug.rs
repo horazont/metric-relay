@@ -51,8 +51,8 @@ impl DebugStdoutSink {
 	{
 		loop {
 			tokio::select! {
-				sample = samples.recv() => match sample {
-					Some(readout) => {
+				readouts = samples.recv() => match readouts {
+					Some(mut readouts) => for readout in readouts.drain(..) {
 						println!("  {}", readout.timestamp);
 						println!("    {} @ {}", readout.path.device_type, readout.path.instance);
 						for (comp, value) in readout.components.iter() {
@@ -128,7 +128,7 @@ impl RandomSource {
 						});
 					}
 				}
-				match sink.send(Arc::new(result)) {
+				match sink.send(vec![Arc::new(result)]) {
 					Ok(_) => (),
 					Err(_) => {
 						warn!("random sample lost, no receivers");

@@ -79,9 +79,6 @@ name = "bytes"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b700ce4376041dcd0a327fd0097c41095743c4c8af8887265942faf1100bd040"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "cc"
@@ -555,7 +552,6 @@ dependencies = [
  "microtemplate",
  "num-traits",
  "num_enum",
- "openat",
  "rand",
  "rand_distr",
  "rand_xoshiro",
@@ -711,15 +707,6 @@ name = "once_cell"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "692fcb63b64b1758029e0a96ee63e049ce8c5948587f2f7208df04625e5f6b56"
-
-[[package]]
-name = "openat"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95aa7c05907b3ebde2610d602f4ddd992145cc6a84493647c30396f30ba83abe"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "openssl"

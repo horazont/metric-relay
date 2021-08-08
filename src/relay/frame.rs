@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -12,19 +13,38 @@ use bincode::Options;
 
 use serde;
 use serde::{Deserializer, Serializer};
+use serde::ser::SerializeSeq;
+use serde::de::{SeqAccess, Visitor};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::metric;
 
 #[derive(Debug, Clone)]
-pub struct ReadoutWrap(Arc<metric::Readout>);
+pub struct ReadoutWrap(Vec<Arc<metric::Readout>>);
+
+struct ReadoutsVisitor();
+
+impl<'de> Visitor<'de> for ReadoutsVisitor {
+	type Value = ReadoutWrap;
+
+	fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str("a vector of readouts")
+	}
+
+	fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+		let mut result = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+		while let Some(next) = seq.next_element()? {
+			result.push(Arc::new(next));
+		}
+		Ok(ReadoutWrap(result))
+	}
+}
 
 impl<'de> serde::Deserialize<'de> for ReadoutWrap {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de>
     {
-        let r = metric::Readout::deserialize(deserializer)?;
-        Ok(ReadoutWrap(Arc::new(r)))
+		deserializer.deserialize_seq(ReadoutsVisitor())
     }
 }
 
@@ -32,33 +52,31 @@ impl serde::Serialize for ReadoutWrap {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 		where S: Serializer
 	{
-		(*self.0).serialize(serializer)
+		let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+		for readout in self.0.iter() {
+			seq.serialize_element(&**readout)?;
+		}
+		seq.end()
 	}
 }
 
 impl Deref for ReadoutWrap {
-	type Target = Arc<metric::Readout>;
+	type Target = Vec<Arc<metric::Readout>>;
 
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
-impl From<ReadoutWrap> for Arc<metric::Readout> {
+impl From<ReadoutWrap> for Vec<Arc<metric::Readout>> {
 	fn from(other: ReadoutWrap) -> Self {
 		other.0
 	}
 }
 
-impl From<Arc<metric::Readout>> for ReadoutWrap {
-	fn from(other: Arc<metric::Readout>) -> Self {
+impl From<Vec<Arc<metric::Readout>>> for ReadoutWrap {
+	fn from(other: Vec<Arc<metric::Readout>>) -> Self {
 		Self(other)
-	}
-}
-
-impl From<metric::Readout> for ReadoutWrap {
-	fn from(other: metric::Readout) -> Self {
-		Self(Arc::new(other))
 	}
 }
 

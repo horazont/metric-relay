@@ -76,7 +76,7 @@ impl Filter for Transpose {
 			},
 		});
 
-		let mut readout_mut = Arc::make_mut(&mut readout);
+		let readout_mut = Arc::make_mut(&mut readout);
 		readout_mut.tags.push(self.tag.clone());
 
 		for mut sample in readout_mut.samples.drain(..) {

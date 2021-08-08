@@ -1,16 +1,18 @@
+#[cfg(feature = "debug")]
 use std::fmt;
+#[cfg(feature = "debug")]
 use std::sync::Arc;
 
+#[allow(unused_imports)]
 use log::{warn, debug, trace};
-
-use chrono::{DateTime, Utc, Duration};
 
 use tokio::sync::mpsc;
 use tokio::sync::broadcast;
 
+#[cfg(feature = "debug")]
 use crate::stream;
-use crate::metric;
 
+#[cfg(feature = "debug")]
 use super::payload;
 
 
@@ -54,24 +56,28 @@ impl<T: 'static + Clone + Send> Serializer<T> {
 }
 
 
+#[cfg(feature = "debug")]
 #[derive(Debug)]
 pub enum BufferedStreamError {
 	BufferWriteError(stream::WriteError),
 	SendError(broadcast::error::SendError<payload::Stream>),
 }
 
+#[cfg(feature = "debug")]
 impl From<broadcast::error::SendError<payload::Stream>> for BufferedStreamError {
 	fn from(other: broadcast::error::SendError<payload::Stream>) -> Self {
 		Self::SendError(other)
 	}
 }
 
+#[cfg(feature = "debug")]
 impl From<stream::WriteError> for BufferedStreamError {
 	fn from(other: stream::WriteError) -> Self {
 		Self::BufferWriteError(other)
 	}
 }
 
+#[cfg(feature = "debug")]
 impl fmt::Display for BufferedStreamError {
 	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -81,6 +87,7 @@ impl fmt::Display for BufferedStreamError {
 	}
 }
 
+#[cfg(feature = "debug")]
 impl std::error::Error for BufferedStreamError {
 	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
 		match self {
@@ -90,11 +97,13 @@ impl std::error::Error for BufferedStreamError {
 	}
 }
 
+#[cfg(feature = "debug")]
 pub struct BufferedStream<T: stream::StreamBuffer + ?Sized> {
 	buffer: Box<T>,
 	sink: broadcast::Sender<payload::Stream>,
 }
 
+#[cfg(feature = "debug")]
 impl<T: stream::StreamBuffer + ?Sized> BufferedStream<T> {
 	pub fn new(buffer: Box<T>, sink: broadcast::Sender<payload::Stream>) -> Self {
 		Self{buffer, sink}

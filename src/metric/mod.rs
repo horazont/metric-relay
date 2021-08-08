@@ -1,13 +1,9 @@
 use std::fmt;
-use std::convert::TryInto;
 use std::str::FromStr;
-
-use bytes::Bytes;
 
 use chrono::{DateTime, Utc};
 use std::time::Duration;
 use smartstring::alias::{String as SmartString};
-use byteorder::{ReadBytesExt, LittleEndian};
 
 use serde_derive::{Deserialize, Serialize};
 

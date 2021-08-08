@@ -38,7 +38,7 @@ impl SummaryWorker {
 		});
 	}
 
-	fn process_chunk(t: DateTime<Utc>, path: &metric::DevicePath, chunk: &[i16], scale: &metric::Value) -> payload::Sample {
+	fn process_chunk(t: DateTime<Utc>, path: &metric::DevicePath, chunk: &[i16], scale: &metric::Value) -> payload::Readout {
 		let mut sum = 0.0f64;
 		let mut min = 1.0f64 / 0.0;
 		let mut max = -1.0f64 / 0.0;
@@ -51,7 +51,7 @@ impl SummaryWorker {
 			max = max.max(vf);
 		}
 		let lenf = chunk.len() as f64;
-		let sq_avg = (sq_sum / lenf);
+		let sq_avg = sq_sum / lenf;
 		let rms = sq_avg.sqrt();
 		let avg = sum / lenf;
 		let variance = sq_avg - avg*avg;
@@ -73,9 +73,11 @@ impl SummaryWorker {
 
 	fn process(size: usize, block: payload::Stream, sink: broadcast::Sender<payload::Sample>) {
 		let period = Duration::from_std(block.period).unwrap();
+		let mut readouts = Vec::new();
 
 		match block.data {
 			metric::RawData::I16(ref vec) => {
+				readouts.reserve(vec.len() / size);
 				for (i, chunk) in vec.chunks(size).enumerate() {
 					if chunk.len() != size {
 						warn!("partial chunk, data lost");
@@ -83,15 +85,20 @@ impl SummaryWorker {
 					}
 
 					let t = block.t0 + (period * (i * size) as i32);
-					let readout = Self::process_chunk(t, &block.path, chunk, &block.scale);
-					match sink.send(readout) {
-						Ok(_) => (),
-						Err(e) => {
-							warn!("no receivers, summary sample lost");
-						}
-					}
+					readouts.push(Self::process_chunk(t, &block.path, chunk, &block.scale));
 				}
 			},
+		}
+
+		if readouts.len() == 0 {
+			return
+		}
+
+		match sink.send(readouts) {
+			Ok(_) => (),
+			Err(_) => {
+				warn!("no receivers, summary sample lost");
+			}
 		}
 	}
 

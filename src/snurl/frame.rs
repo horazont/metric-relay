@@ -5,7 +5,7 @@ use num_enum::TryFromPrimitive;
 
 use bytes::{Bytes, Buf, BufMut};
 
-use super::serial::SerialNumber;
+use crate::serial::SerialNumber;
 
 pub type ConnectionId = u32;
 pub static PROTOCOL_VERSION: u8 = 0x00;
@@ -173,13 +173,4 @@ pub struct AppRequest {
 pub struct AppResponse {
 	request_id: RequestId,
 	payload: Bytes,
-}
-
-#[derive(Debug, Clone)]
-pub enum PacketPayload {
-	AppRequest(AppRequest),
-	AppResponse(AppResponse),
-	Data(Bytes),
-	/// Inform about a number of lost data frames
-	DataLoss(usize),
 }

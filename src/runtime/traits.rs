@@ -13,6 +13,8 @@ pub trait Sink {
 	fn attach_source<'x>(&self, src: &'x dyn Source);
 }
 
+// may be unused depending on the feature set, but encoding that usedness in a cfg flag would be insane
+#[allow(dead_code)]
 pub fn null_receiver<T: Clone>() -> broadcast::Receiver<T> {
 	let (_, receiver)= broadcast::channel(1);
 	receiver

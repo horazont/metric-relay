@@ -16,14 +16,16 @@ struct PubSubWorker {
 impl PubSubWorker {
 	async fn run(&mut self) {
 		loop {
-			let sample = match self.samples.recv().await {
+			let mut readouts = match self.samples.recv().await {
 				None => return,
 				Some(v) => v,
 			};
-			match self.client.post(&sample).await {
-				Ok(_) => (),
-				Err(e) => warn!("lost sample: failed to submit to influxdb: {}", e),
-			};
+			for readout in readouts.drain(..) {
+				match self.client.post(&readout).await {
+					Ok(_) => (),
+					Err(e) => warn!("lost sample: failed to submit to influxdb: {}", e),
+				};
+			}
 		}
 	}
 }

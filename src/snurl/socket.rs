@@ -10,10 +10,10 @@ use tokio::io::Result as IoResult;
 use bytes::{Bytes, BytesMut, Buf, BufMut};
 use getrandom;
 
-use super::frame::{RawPacketType, PacketPayload, RawCommonHeader, AppRequest, AppResponse, ConnectionId, DataFrame, PROTOCOL_VERSION, RawDataFrameHeader};
+use super::frame::{RawPacketType, RawCommonHeader, AppRequest, AppResponse, ConnectionId, PROTOCOL_VERSION, RawDataFrameHeader};
 use super::recvqueue::RecvQueue;
 use super::sendqueue::SendQueue;
-use super::serial::SerialNumber;
+use crate::serial::SerialNumber;
 
 #[derive(Debug, Clone)]
 pub enum RecvItem {
@@ -260,14 +260,6 @@ impl Receiver {
 			read_some = true;
 		}
 		Ok(read_some)
-	}
-
-	fn _decode_app_request(&mut self) -> IoResult<PacketPayload> {
-		panic!("not implemented")
-	}
-
-	fn _decode_app_response(&mut self) -> IoResult<PacketPayload> {
-		panic!("not implemented")
 	}
 
 	// Process handshake

@@ -99,6 +99,7 @@ impl FftWorker {
 			self.overhang = Some(overhang);
 
 			let window_offset = (self.inner.len() / 2) as i64;
+			let mut readouts = Vec::with_capacity(result.len());
 			for (offset, mut freq_magnitudes) in result.drain(..) {
 				let at = (offset + window_offset) as i32;
 				let tc = batch.t0 + chrono::Duration::from_std(batch.period).unwrap() * at;
@@ -113,18 +114,18 @@ impl FftWorker {
 					components.insert(buf, metric::Value{magnitude: magnitude as f64, unit: batch.scale.unit.clone()});
 				};
 
-				let readout = Arc::new(metric::Readout{
+				readouts.push(Arc::new(metric::Readout{
 					timestamp: tc,
 					path: batch.path.clone(),
 					components,
-				});
+				}));
 
-				match self.sink.send(readout) {
-					Ok(_) => (),
-					Err(_) => {
-						warn!("lost fft processed sample, no receivers");
-					},
-				}
+			}
+			match self.sink.send(readouts) {
+				Ok(_) => (),
+				Err(_) => {
+					warn!("lost fft processed sample, no receivers");
+				},
 			}
 		}
 	}
