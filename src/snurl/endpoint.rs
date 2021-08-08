@@ -1,5 +1,4 @@
-use super::socket::Socket;
-use super::frame::PacketPayload;
+use super::socket::{Socket, RecvItem};
 // use std::io::{Error as StdIoError};
 use std::error::Error;
 
@@ -17,7 +16,7 @@ enum Function {
 #[derive(Debug)]
 pub struct Endpoint {
 	cmdch: Sender<Function>,
-	pktch: Receiver<Bytes>,
+	pktch: Receiver<RecvItem>,
 }
 
 impl Endpoint {
@@ -33,15 +32,10 @@ impl Endpoint {
 		}
 	}
 
-	async fn _main_loop(mut s: Socket, mut cmdrx: Receiver<Function>, pktsink: Sender<Bytes>) -> Result<(), Box<dyn Error>> {
+	async fn _main_loop(mut s: Socket, mut cmdrx: Receiver<Function>, pktsink: Sender<RecvItem>) -> Result<(), Box<dyn Error>> {
 		loop {
 			tokio::select! {
-				payload = s.recv_packet() => match payload? {
-					PacketPayload::Data(b) => {
-						pktsink.send(b).await?;
-					},
-					other => panic!("unhandled recv: {:?}", other)
-				},
+				payload = s.recv_packet() => pktsink.send(payload?).await?,
 				func = cmdrx.recv() => match func {
 					Some(Function::SendData(payload)) => {
 						s.send_data(payload).await?;
@@ -59,7 +53,7 @@ impl Endpoint {
 		}
 	}
 
-	pub async fn recv_data(&mut self) -> Option<Bytes> {
+	pub async fn recv_data(&mut self) -> Option<RecvItem> {
 		self.pktch.recv().await
 	}
 }

@@ -11,6 +11,8 @@ mod relay;
 mod router;
 mod influxdb;
 mod pubsub;
+mod fft;
+mod summary;
 
 pub use traits::{Source, Sink, Node};
 pub use config::{Config, BuildError};

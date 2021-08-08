@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt;
 use std::ops::{Add, Sub};
 
 type Usn = u16;
@@ -8,6 +9,12 @@ static THRESHOLD: Usn = (Usn::MAX >> 1) + 1;
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct SerialNumber(Usn);
+
+impl fmt::Display for SerialNumber {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		fmt::Display::fmt(&self.0, f)
+	}
+}
 
 impl Eq for SerialNumber {}
 

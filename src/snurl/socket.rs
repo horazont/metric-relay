@@ -15,6 +15,12 @@ use super::recvqueue::RecvQueue;
 use super::sendqueue::SendQueue;
 use super::serial::SerialNumber;
 
+#[derive(Debug, Clone)]
+pub enum RecvItem {
+	ResyncMarker,
+	Data(Bytes),
+}
+
 fn get_random_u16() -> u16 {
 	let mut backing = [0u8; 2];
 	getrandom::getrandom(&mut backing[..]).expect("random data read failed");
@@ -170,7 +176,7 @@ struct Receiver {
 	// this state is only relevant for the receiver, so it is safe to keep outside the SharedState. it will be protected by the borrowchecker
 	half_synced: bool,
 	// packets which can be read right away in this order, typically flushed out of the recvqueue on a resync
-	pending: Vec<DataFrame>,
+	pending: Vec<RecvItem>,
 }
 
 impl fmt::Debug for Receiver {
@@ -334,7 +340,9 @@ impl Receiver {
 	}
 
 	fn _resync(&mut self, lowest_sn: SerialNumber) {
-		self.pending.append(&mut self.q.flush(lowest_sn));
+		self.pending.reserve(self.q.len() + 1);
+		self.pending.push(RecvItem::ResyncMarker);
+		self.pending.extend(self.q.flush(lowest_sn).drain(..).map(|x| { RecvItem::Data(x.into_payload())}));
 		self._update_sns()
 	}
 
@@ -374,11 +382,12 @@ impl Receiver {
 		}
 	}
 
-	fn try_read(&mut self) -> Option<DataFrame> {
+	fn try_read(&mut self) -> Option<RecvItem> {
 		if self.pending.len() > 0 {
 			return Some(self.pending.remove(0))
 		}
-		self.q.try_read()
+		self.pending.shrink_to_fit();
+		self.q.try_read().and_then(|x| { Some(RecvItem::Data(x.into_payload())) })
 	}
 
 	fn _restore_buffer(&mut self) {
@@ -387,12 +396,12 @@ impl Receiver {
 		}
 	}
 
-	async fn recv_packet(&mut self, from: &UdpSocket) -> IoResult<PacketPayload> {
+	async fn recv_packet(&mut self, from: &UdpSocket) -> IoResult<RecvItem> {
 		let local_port = from.local_addr().unwrap().port();
 		self._restore_buffer();
 		loop {
 			if let Some(data) = self.try_read() {
-				return Ok(PacketPayload::Data(data.into_payload()))
+				return Ok(data)
 			}
 
 			let mut swapspace: Option<Box<[u8; 65536]>> = None;
@@ -536,9 +545,8 @@ impl Socket {
 		}
 	}
 
-	pub async fn recv_packet(&mut self) -> IoResult<PacketPayload> {
+	pub async fn recv_packet(&mut self) -> IoResult<RecvItem> {
 		self.receiver.recv_packet(&self.inner).await
-		// panic!("not implemented")
 	}
 
 	pub async fn send_data<T: Into<Bytes>>(&mut self, payload: T) -> IoResult<()> {

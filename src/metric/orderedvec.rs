@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::cmp::Ord;
 use std::fmt;
+use std::ops::RangeBounds;
 
 use serde_derive::{Deserialize, Serialize};
 
@@ -32,6 +33,10 @@ impl<K: PartialEq, V: PartialEq> PartialEq for OrderedVec<K, V> {
 impl<K, V> OrderedVec<K, V> {
 	pub fn new() -> Self {
 		Self(Vec::new())
+	}
+
+	pub fn with_capacity(capacity: usize) -> Self {
+		Self(Vec::with_capacity(capacity))
 	}
 
 	#[inline]
@@ -128,6 +133,10 @@ impl<K, V> OrderedVec<K, V> {
 
 	pub fn reserve_exact(&mut self, additional: usize) {
 		self.0.reserve_exact(additional)
+	}
+
+	pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, (K, V)> {
+		self.0.drain(range)
 	}
 }
 

@@ -217,7 +217,7 @@ impl Default for LinearRTC {
 		Self::new(
 			1500,
 			Duration::seconds(60),
-			2,
+			1,
 			30000,
 		)
 	}
@@ -267,7 +267,7 @@ impl RTCifier for LinearRTC {
 	}
 
 	fn ready(&self) -> bool {
-		self.history.len() >= 2
+		self.history.len() >= 10
 	}
 }
 
@@ -493,6 +493,80 @@ impl RTCifier for RangeRTC {
 		let ms = timestamp - offset;
 		// println!("{} {} {} {}", threshold, timestamp, ms, self.state.as_ref().unwrap().rtc);
 		self.state.as_ref().unwrap().rtc + Duration::milliseconds(ms)
+	}
+
+	fn reset(&mut self) {
+		self.range = None;
+	}
+
+	fn ready(&self) -> bool {
+		self.range.is_some()
+	}
+}
+
+#[derive(Debug)]
+pub struct RangeRTCv2 {
+	timeline: Timeline,
+	range: Option<(i64, i64)>,
+	state: Option<(DateTime<Utc>, u16, u16)>,
+}
+
+impl RangeRTCv2 {
+	pub fn new(timeline_slack: u16) -> Self {
+		Self{
+			timeline: Timeline::new(timeline_slack),
+			range: None,
+			state: None,
+		}
+	}
+
+	fn get_offset(&self) -> i64 {
+		let (lower, upper) = self.range.unwrap();
+		(lower + upper) / 2
+	}
+}
+
+impl Default for RangeRTCv2 {
+	fn default() -> Self {
+		Self::new(30000)
+	}
+}
+
+impl RTCifier for RangeRTCv2 {
+	fn align(&mut self, rtc: DateTime<Utc>, timestamp: u16) {
+		let state = match self.state.as_mut() {
+			None => {
+				// this is now our forever epoch for the timestamp value
+				self.state = Some((rtc, timestamp, timestamp));
+				self.timeline.reset(timestamp);
+				return;
+			},
+			Some(st) => st,
+		};
+
+		if state.0 != rtc {
+			// we have passed a second, so we now advance all the things
+			// first, we need to advance the timeline
+			state.2 = state.2.wrapping_add(1000);
+			self.timeline.reset(state.2);
+			let lower_bound = self.timeline.feed_and_transform(state.1);
+			let upper_bound = self.timeline.feed_and_transform(timestamp);
+
+			self.range = Some((lower_bound, upper_bound));
+			state.0 = rtc;
+		}
+
+		// advance the internal timestamp value so that we know the bound
+		// for a transition
+		state.1 = timestamp;
+	}
+
+	fn map_to_rtc(&mut self, timestamp: u16) -> DateTime<Utc> {
+		let offset = self.get_offset();
+		let timestamp = self.timeline.feed_and_transform(timestamp);
+		let ms = timestamp - offset;
+		eprintln!("{} {} {} {:?}", offset, timestamp, ms, self.state);
+		self.state.as_ref().unwrap().0 + Duration::milliseconds(ms)
 	}
 
 	fn reset(&mut self) {
@@ -846,5 +920,134 @@ mod test_rtcifierv2 {
 		// lower bound is 270, upper bound is 290 -> midpoint is
 
 		assert_eq!(rtcifier.map_to_rtc(2290), Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 17, 10));
+	}
+}
+
+#[derive(Debug, Clone)]
+struct RangeRTCLioriState {
+	rtc_epoch: DateTime<Utc>,
+	prev_rtc: DateTime<Utc>,
+	prev_abs_ctr: i64,
+	rolling_average: Option<i64>,
+}
+
+impl RangeRTCLioriState {
+	fn new(rtc: DateTime<Utc>, abs_ctr: i64) -> Self {
+		Self{
+			rtc_epoch: rtc,
+			prev_rtc: rtc,
+			prev_abs_ctr: abs_ctr,
+			rolling_average: None,
+		}
+	}
+
+	fn shift(&mut self, offset: i64) {
+		match self.rolling_average {
+			Some(previous) => {
+				self.rolling_average = Some(
+					(previous - (previous >> 1)) +
+					(offset >> 1)
+				);
+			},
+			None => self.rolling_average = Some(offset),
+		}
+	}
+
+	fn get_offset_estimate(&self) -> i64 {
+		self.rolling_average.unwrap()
+	}
+}
+
+#[derive(Debug)]
+pub struct RangeRTCLiori {
+	timeline: Timeline,
+	state: Option<RangeRTCLioriState>,
+	min_hist: VecDeque<i64>,
+	max_hist: VecDeque<i64>,
+}
+
+impl RangeRTCLiori {
+	pub fn new(timeline_slack: u16, hist_size: usize) -> Self {
+		Self{
+			timeline: Timeline::new(timeline_slack),
+			state: None,
+			min_hist: VecDeque::with_capacity(hist_size),
+			max_hist: VecDeque::with_capacity(hist_size),
+		}
+	}
+
+	fn get_min_estimate(&self) -> i64 {
+		*self.min_hist.iter().min().unwrap()
+	}
+
+	fn get_max_estimate(&self) -> i64 {
+		*self.max_hist.iter().max().unwrap()
+	}
+
+	fn get_raw_offset_estimate(&self) -> i64 {
+		let min = self.get_min_estimate();
+		let max = self.get_max_estimate();
+		(max + min) / 2
+	}
+}
+
+impl Default for RangeRTCLiori {
+	fn default() -> Self {
+		Self::new(20000, 128)
+	}
+}
+
+impl RTCifier for RangeRTCLiori {
+	fn align(&mut self, rtc: DateTime<Utc>, timestamp: u16) {
+		let state = match self.state.as_mut() {
+			None => {
+				self.timeline.reset(timestamp);
+				self.state = Some(RangeRTCLioriState::new(
+					rtc, 0
+				));
+				return;
+			},
+			Some(st) => st,
+		};
+
+		let abs_ctr = self.timeline.feed_and_transform(timestamp);
+		if rtc != state.prev_rtc {
+			// second transition
+			// calculate the differences
+			let prev_rtc_since_epoch = state.prev_rtc - state.rtc_epoch;
+			let rtc_since_epoch = rtc - state.rtc_epoch;
+			let pre_change_diff_ms = state.prev_abs_ctr - prev_rtc_since_epoch.num_milliseconds();
+			let post_change_diff_ms = abs_ctr - rtc_since_epoch.num_milliseconds();
+			if self.min_hist.len() >= self.min_hist.capacity() {
+				self.min_hist.pop_front();
+			}
+			if self.max_hist.len() >= self.max_hist.capacity() {
+				self.max_hist.pop_front();
+			}
+			self.min_hist.push_back(post_change_diff_ms);
+			self.max_hist.push_back(pre_change_diff_ms);
+
+
+		}
+		state.prev_abs_ctr = abs_ctr;
+		state.prev_rtc = rtc;
+	}
+
+	fn map_to_rtc(&mut self, timestamp: u16) -> DateTime<Utc> {
+		let min = self.get_min_estimate();
+		let max = self.get_max_estimate();
+		let offset = max / 2 + min / 2;
+		let abs_ctr = self.timeline.feed_and_transform(timestamp);
+		self.state.as_ref().unwrap().rtc_epoch + Duration::milliseconds(abs_ctr + offset)
+	}
+
+	fn reset(&mut self) {
+		self.state = None;
+		self.min_hist.clear();
+		self.max_hist.clear();
+	}
+
+	fn ready(&self) -> bool {
+		self.min_hist.len() > 0
 	}
 }

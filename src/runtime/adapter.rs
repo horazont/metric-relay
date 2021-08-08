@@ -1,7 +1,18 @@
-use log::{warn, debug};
+use std::fmt;
+use std::sync::Arc;
+
+use log::{warn, debug, trace};
+
+use chrono::{DateTime, Utc, Duration};
 
 use tokio::sync::mpsc;
 use tokio::sync::broadcast;
+
+use crate::stream;
+use crate::metric;
+
+use super::payload;
+
 
 pub struct Serializer<T: 'static + Clone + Send> {
 	sink: mpsc::Sender<T>,
@@ -39,5 +50,63 @@ impl<T: 'static + Clone + Send> Serializer<T> {
 				}
 			}
 		});
+	}
+}
+
+
+#[derive(Debug)]
+pub enum BufferedStreamError {
+	BufferWriteError(stream::WriteError),
+	SendError(broadcast::error::SendError<payload::Stream>),
+}
+
+impl From<broadcast::error::SendError<payload::Stream>> for BufferedStreamError {
+	fn from(other: broadcast::error::SendError<payload::Stream>) -> Self {
+		Self::SendError(other)
+	}
+}
+
+impl From<stream::WriteError> for BufferedStreamError {
+	fn from(other: stream::WriteError) -> Self {
+		Self::BufferWriteError(other)
+	}
+}
+
+impl fmt::Display for BufferedStreamError {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::BufferWriteError(ref v) => v.fmt(f),
+			Self::SendError(ref v) => v.fmt(f),
+		}
+	}
+}
+
+impl std::error::Error for BufferedStreamError {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		match self {
+			Self::BufferWriteError(ref v) => Some(v),
+			Self::SendError(ref v) => Some(v),
+		}
+	}
+}
+
+pub struct BufferedStream<T: stream::StreamBuffer + ?Sized> {
+	buffer: Box<T>,
+	sink: broadcast::Sender<payload::Stream>,
+}
+
+impl<T: stream::StreamBuffer + ?Sized> BufferedStream<T> {
+	pub fn new(buffer: Box<T>, sink: broadcast::Sender<payload::Stream>) -> Self {
+		Self{buffer, sink}
+	}
+
+	pub fn send(&mut self, block: payload::Stream) -> Result<(), BufferedStreamError> {
+		trace!("writing block to buffer: path={}  t0={}  seq0={}  len={}", block.path, block.t0, block.seq0, block.data.len());
+		self.buffer.write(&block)?;
+		while let Some(block) = self.buffer.read_next() {
+			trace!("emitting block from buffer: path={}  t0={}  seq0={}  len={}", block.path, block.t0, block.seq0, block.data.len());
+			self.sink.send(Arc::new(block))?;
+		}
+		Ok(())
 	}
 }

@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut aligned = false;
 
 	loop {
-		if let Some(mut buf) = ep.recv_data().await {
+		if let Some(snurl::RecvItem::Data(mut buf)) = ep.recv_data().await {
 			/*let mut fullbuf = BytesMut::new();
 			fullbuf.put(buf);
 			fullbuf.resize(133, 0u8);

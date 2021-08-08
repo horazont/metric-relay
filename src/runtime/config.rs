@@ -20,7 +20,10 @@ use super::relay;
 use super::router;
 use super::influxdb;
 use super::pubsub;
+use super::fft;
+use super::summary;
 
+use crate::stream;
 use crate::metric;
 use crate::script;
 use crate::snurl;
@@ -166,6 +169,70 @@ pub struct RandomComponent {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "mode")]
+pub enum StreamBufferConfig {
+	InMemory{
+		slice: i64,
+	},
+}
+
+impl StreamBufferConfig {
+	fn build(&self) -> Box<dyn stream::StreamBuffer + Send + Sync + 'static> {
+		match self {
+			Self::InMemory{slice} => {
+				Box::new(stream::InMemoryBuffer::new(
+					chrono::Duration::milliseconds(*slice),
+				))
+			},
+		}
+	}
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InfluxDBPredicate {
+	match_measurement: Option<PatternWrap>,
+	#[serde(default = "bool_false")]
+	invert: bool,
+}
+
+impl InfluxDBPredicate {
+	fn build(&self) -> crate::influxdb::Select {
+		crate::influxdb::Select{
+			invert: self.invert,
+			match_measurement: self.match_measurement.as_ref().and_then(|x| {
+				Some(x.0.clone())
+			}),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum InfluxDBMapping {
+	Transpose{
+		predicate: Option<InfluxDBPredicate>,
+		tag: String,
+		field: String,
+	},
+}
+
+impl InfluxDBMapping {
+	fn build(&self) -> Result<Box<dyn crate::influxdb::Filter>, BuildError> {
+		match self {
+			Self::Transpose{predicate, tag, field} => {
+				Ok(Box::new(crate::influxdb::Transpose{
+					predicate: predicate.clone().and_then(|cfg| {
+						Some(cfg.build())
+					}).unwrap_or_else(|| { crate::influxdb::Select::default() }),
+					tag: tag.clone().into(),
+					field: field.clone().into(),
+				}))
+			},
+		}
+	}
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "class")]
 pub enum Node {
 	SBX{
@@ -194,11 +261,28 @@ pub enum Node {
 		database: String,
 		retention_policy: Option<String>,
 		precision: crate::influxdb::Precision,
+		mapping: Vec<InfluxDBMapping>,
 	},
 	PubSub{
 		api_url: String,
 		node_template: String,
 		override_host: Option<String>,
+	},
+	Sine{
+		nsamples: u16,
+		sample_period: u16,
+		instance: String,
+		device_type: String,
+		scale: f64,
+		period: f64,
+		phase: f64,
+		buffer: StreamBufferConfig,
+	},
+	FFT{
+		size: usize,
+	},
+	Summary{
+		size: usize,
 	},
 }
 
@@ -260,17 +344,22 @@ impl Node {
 				for filter in filters.iter() {
 					built_filters.push(filter.build()?);
 				}
-				Ok(traits::Node::from(router::SampleRouter::new(
+				Ok(traits::Node::from(router::Router::new(
 					built_filters,
 				)))
 			},
-			Self::InfluxDB{api_url, auth, database, retention_policy, precision} => {
+			Self::InfluxDB{api_url, auth, database, retention_policy, precision, mapping} => {
+				let mut built_filters = Vec::new();
+				for filter in mapping.iter() {
+					built_filters.push(filter.build()?);
+				}
 				Ok(traits::Node::from_sink(influxdb::InfluxDBSink::new(
 					api_url.clone(),
 					auth.clone(),
 					database.clone(),
 					retention_policy.clone(),
 					*precision,
+					built_filters,
 				)))
 			},
 			Self::PubSub{api_url, node_template, override_host} => {
@@ -278,6 +367,33 @@ impl Node {
 					api_url.clone(),
 					node_template.clone(),
 					override_host.clone(),
+				)))
+			},
+			Self::Sine{nsamples, sample_period, instance, device_type, scale, period, phase, buffer} => {
+				Ok(traits::Node::from_source(debug::SineSource::new(
+					*nsamples,
+					time::Duration::from_millis(*sample_period as u64),
+					metric::DevicePath{
+						instance: instance.into(),
+						device_type: device_type.into(),
+					},
+					metric::Value{
+						unit: metric::Unit::Arbitrary,
+						magnitude: *scale,
+					},
+					*period,
+					*phase,
+					buffer.build(),
+				)))
+			},
+			Self::FFT{size} => {
+				Ok(traits::Node::from(fft::Fft::new(
+					*size,
+				)))
+			},
+			Self::Summary{size} => {
+				Ok(traits::Node::from(summary::Summary::new(
+					*size,
 				)))
 			},
 		}
@@ -326,6 +442,15 @@ pub enum Filter {
 		predicate: Option<FilterPredicate>,
 		mapping: HashMap<SmartString, SmartString>,
 	},
+	MapDeviceType{
+		predicate: Option<FilterPredicate>,
+		mapping: HashMap<SmartString, SmartString>,
+	},
+	Map{
+		predicate: Option<FilterPredicate>,
+		script: ScriptWrap,
+		new_unit: UnitWrap,
+	},
 }
 
 impl Filter {
@@ -365,6 +490,25 @@ impl Filter {
 						None => filter::SelectByPath::default(),
 					},
 					mapping: mapping.clone(),
+				}))
+			},
+			Self::MapDeviceType{predicate, mapping} => {
+				Ok(Box::new(filter::MapDeviceType{
+					predicate: match predicate {
+						Some(p) => p.build()?,
+						None => filter::SelectByPath::default(),
+					},
+					mapping: mapping.clone(),
+				}))
+			},
+			Self::Map{predicate, script, new_unit} => {
+				Ok(Box::new(filter::Map{
+					predicate: match predicate {
+						Some(p) => p.build()?,
+						None => filter::SelectByPath::default(),
+					},
+					script: script.0.clone(),
+					new_unit: new_unit.0.clone(),
 				}))
 			},
 		}

@@ -95,6 +95,12 @@ pub struct DevicePath {
 	pub instance: SmartString,
 }
 
+impl fmt::Display for DevicePath {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}:{}", self.device_type, self.instance)
+	}
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Value {
 	pub magnitude: f64,
@@ -151,58 +157,6 @@ impl RawData {
 	pub fn len(&self) -> usize {
 		match self {
 			Self::I16(v) => v.len(),
-		}
-	}
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum StreamBlockData {
-	Compressed(StreamFormat, Bytes),
-	Uncompressed(StreamFormat, Bytes),
-	Decoded(RawData),
-}
-
-impl StreamBlockData {
-	/// Ensure that the in-memory representation is decoded.
-	fn decoded(self) -> StreamBlockData {
-		let (fmt, decompressed) = match self {
-			StreamBlockData::Compressed(fmt, gzbytes) => (fmt, gzbytes),
-			StreamBlockData::Uncompressed(fmt, bytes) => (fmt, bytes),
-			StreamBlockData::Decoded(data) => return StreamBlockData::Decoded(data),
-		};
-		match fmt {
-			StreamFormat::I16 => {
-				let samples = decompressed.len() / 2;
-				let mut buf = Vec::<i16>::new();
-				buf.resize(samples, 0i16);
-				(&decompressed[..]).read_i16_into::<LittleEndian>(&mut buf[..]).unwrap();
-				StreamBlockData::Decoded(RawData::I16(buf))
-			}
-		}
-	}
-}
-
-impl From<Vec<i16>> for StreamBlockData {
-	fn from(v: Vec<i16>) -> StreamBlockData {
-		StreamBlockData::Decoded(RawData::I16(v))
-	}
-}
-
-impl TryInto<Vec<i16>> for StreamBlockData {
-	type Error = StreamFormat;
-
-	fn try_into(self) -> Result<Vec<i16>, Self::Error> {
-		let next = match self {
-			StreamBlockData::Compressed(StreamFormat::I16, _) => self.decoded(),
-			// StreamBlockData::Compressed(other, _) => return Err(other),
-			StreamBlockData::Uncompressed(StreamFormat::I16, _) => self.decoded(),
-			// StreamBlockData::Uncompressed(other, _) => return Err(other),
-			StreamBlockData::Decoded(RawData::I16(_)) => self,
-		};
-		if let StreamBlockData::Decoded(RawData::I16(v)) = next {
-			Ok(v)
-		} else {
-			unreachable!();
 		}
 	}
 }

@@ -194,6 +194,10 @@ fn parse_token(s: &str) -> CompileResult<Token> {
 		},
 		'+' if s.len() == 1 => Ok(Token::Operation(Operator::Add)),
 		'-' if s.len() == 1 => Ok(Token::Operation(Operator::Sub)),
+		'-' => match s.parse::<f64>() {
+			Ok(v) => Ok(Token::Number(v)),
+			Err(_) => Err(CompileError::InvalidToken(s.into())),
+		},
 		'*' if s.len() == 1 => Ok(Token::Operation(Operator::Mul)),
 		'/' if s.len() == 1 => Ok(Token::Operation(Operator::Div)),
 		'^' if s.len() == 1 => Ok(Token::Operation(Operator::Pow)),
@@ -310,12 +314,16 @@ impl FromStr for Box<dyn Evaluate> {
 						}
 					},
 					"dB" => {
-						if stack.len() < 1 {
+						if stack.len() < 2 {
 							return Err(CompileError::StackUnderflow)
 						} else {
+							let limit = stack.pop().unwrap();
 							let value = stack.pop().unwrap();
-							stack.push(Box::new(func::ToDecibelOp{
-								value
+							stack.push(Box::new(func::F2Op{
+								p1: value,
+								p2: limit,
+								f: func::to_decibel,
+								label: "dB",
 							}))
 						}
 					},
@@ -345,6 +353,14 @@ mod test_compile {
 		let ctx = Context::empty();
 		let expr = s.parse::<Box<dyn Evaluate>>().unwrap();
 		assert_eq!(expr.evaluate(&ctx).unwrap(), 23.42f64);
+	}
+
+	#[test]
+	fn test_negative_constant() {
+		let s = "-23.42";
+		let ctx = Context::empty();
+		let expr = s.parse::<Box<dyn Evaluate>>().unwrap();
+		assert_eq!(expr.evaluate(&ctx).unwrap(), -23.42f64);
 	}
 
 	#[test]

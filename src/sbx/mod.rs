@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::io::{Result as StdIoResult, Error as StdIoError, ErrorKind as StdIoErrorKind};
 use bytes::Buf;
 
@@ -5,6 +6,7 @@ mod frame;
 mod rtcifier;
 mod generators;
 mod bme280;
+mod stream;
 
 pub use frame::{
 	EspMessageHeader,
@@ -19,8 +21,13 @@ pub use frame::{
 	SbxStreamMessage,
 };
 
-pub use rtcifier::{LinearRTC, RangeRTC, FilteredRTC, RTCifier};
+pub use rtcifier::{LinearRTC, RangeRTC, RangeRTCv2, RangeRTCLiori, FilteredRTC, RTCifier};
 pub use generators::ReadoutIterable;
+
+pub use stream::{
+	StreamKind,
+	StreamDecoder,
+};
 
 #[derive(Debug, Clone)]
 pub enum ReadoutMessage {
@@ -67,41 +74,18 @@ impl<'x, T: rtcifier::RTCifier + 'static> generators::ReadoutIterable<'x, T> for
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum IMUSensor {
-	Accel,
-	Compass,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum IMUAxis {
-	X, Y, Z,
-}
-
 #[derive(Debug, Clone)]
 pub struct StreamMessage {
-	pub sensor: IMUSensor,
-	pub axis: IMUAxis,
+	pub kind: StreamKind,
 	pub data: SbxStreamMessage,
 }
 
 impl StreamMessage {
 	pub fn build(msgtype: SbxMessageType, data: SbxStreamMessage) -> StreamMessage {
-		use IMUSensor::*;
-		use IMUAxis::*;
 		use SbxMessageType::*;
-		let (sensor, axis) = match msgtype {
-			SensorStreamAccelX => (Accel, X),
-			SensorStreamAccelY => (Accel, Y),
-			SensorStreamAccelZ => (Accel, Z),
-			SensorStreamCompassX => (Compass, X),
-			SensorStreamCompassY => (Compass, Y),
-			SensorStreamCompassZ => (Compass, Z),
-			other => panic!("invalid stream message type: {:?}", other),
-		};
+		let kind: stream::StreamKind = msgtype.try_into().expect("stream message kind");
 		StreamMessage{
-			sensor,
-			axis,
+			kind,
 			data,
 		}
 	}

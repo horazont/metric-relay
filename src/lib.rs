@@ -7,4 +7,4 @@ pub mod meteo;
 pub mod relay;
 pub mod influxdb;
 pub mod pubsub;
-// pub mod stream;
+pub mod stream;

@@ -25,7 +25,7 @@ pub static LIGHT_CLEAR_COMPONENT: &'static str = "clear";
 pub struct Empty();
 
 pub trait ReadoutIterable<'x, T: rtcifier::RTCifier> {
-	type GenIter: Iterator;
+	type GenIter: Iterator<Item = metric::Readout>;
 
 	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter;
 }

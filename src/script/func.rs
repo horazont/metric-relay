@@ -50,21 +50,8 @@ pub fn wet_bulb_temperature_wrap(temp: f64, hum: f64) -> result::EvalResult<f64>
 	Ok(meteo::wet_bulb_temperature(temp, hum))
 }
 
-#[derive(Debug)]
-pub struct ToDecibelOp {
-	pub value: Box<dyn context::Evaluate>,
-}
-
-impl fmt::Display for ToDecibelOp {
-	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} !dB", self.value)
-	}
-}
-
-impl context::Evaluate for ToDecibelOp {
-	fn evaluate<'x>(&self, ctx: &'x context::Context) -> result::EvalResult<f64> {
-		Ok(self.value.evaluate(ctx)?.log10() * 10.0)
-	}
+pub fn to_decibel(value: f64, limit: f64) -> result::EvalResult<f64> {
+	Ok((value.log10() * 10.0).max(limit))
 }
 
 

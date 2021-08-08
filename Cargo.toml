@@ -33,3 +33,7 @@ xml-rs = { version = "0.8" }
 openat = { version = "0.1" }
 rand_xoshiro = { version = "0.6" }
 rand_distr = { version = "0.4" }
+num-traits = { version = "0.2" }
+rustfft = { version = "6.0" }
+enum-map = { version = "0.6" }
+# enum-map-derive = { version = "0.6" }
