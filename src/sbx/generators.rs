@@ -3,17 +3,20 @@ use std::fmt::Write;
 use smartstring::alias::{String as SmartString};
 
 use crate::metric;
+use crate::bme280;
+use crate::bme280::{
+	TEMPERATURE_COMPONENT as BME280_TEMP_COMPONENT,
+	PRESSURE_COMPONENT as BME280_PRESSURE_COMPONENT,
+	HUMIDITY_COMPONENT as BME280_HUMIDITY_COMPONENT,
+};
+
 use super::frame;
 use super::rtcifier;
-use super::bme280;
 
 use chrono::{DateTime, Utc};
 
 static MAIN_COMPONENT: &'static str = "main";
 pub static DS18B20_TEMP_COMPONENT: &'static str = MAIN_COMPONENT;
-pub static BME280_TEMP_COMPONENT: &'static str = "temperature";
-pub static BME280_PRESSURE_COMPONENT: &'static str = "pressure";
-pub static BME280_HUMIDITY_COMPONENT: &'static str = "humidity";
 pub static NOISE_MIN_COMPONENT: &'static str = "min";
 pub static NOISE_MAX_COMPONENT: &'static str = "max";
 pub static NOISE_RMS_COMPONENT: &'static str = "rms";
@@ -121,18 +124,18 @@ impl BME280Readouts {
 		let readout = bme280::Readout::from_registers(&msg.readout[..]);
 		let ts = rtcifier.map_to_rtc(msg.timestamp);
 		#[allow(non_snake_case)]
-		let (T, P, H) = readout.decode(&calibration);
+		let (T, P, H) = readout.decodef(&calibration);
 		let mut components = metric::OrderedVec::new();
 		components.insert(BME280_TEMP_COMPONENT.into(), metric::Value{
-			magnitude: (T as f64) / 100.0f64,
+			magnitude: T,
 			unit: metric::Unit::Celsius,
 		});
 		components.insert(BME280_PRESSURE_COMPONENT.into(), metric::Value{
-			magnitude: (P as f64) / 256.0f64,
+			magnitude: P,
 			unit: metric::Unit::Pascal,
 		});
 		components.insert(BME280_HUMIDITY_COMPONENT.into(), metric::Value{
-			magnitude: (H as f64) / 1024.0f64,
+			magnitude: H,
 			unit: metric::Unit::Percent,
 		});
 

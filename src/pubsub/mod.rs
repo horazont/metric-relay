@@ -8,6 +8,7 @@ use crate::metric;
 #[derive(Substitutions)]
 struct TemplateArgs<'a> {
 	instance: &'a str,
+	device_type: &'a str,
 }
 
 pub struct Client {
@@ -44,7 +45,10 @@ impl Client {
 		}
 		payload.write_str("</sample-batch>").unwrap();
 
-		let node = render(&self.node_template, TemplateArgs{instance: &readout.path.instance});
+		let node = render(&self.node_template, TemplateArgs{
+			instance: &readout.path.instance,
+			device_type: &readout.path.device_type,
+		});
 
 		let req = self.client.post(format!("{}/{}", self.api_url, node));
 		let req = req.header("Content-Type", "application/xml");

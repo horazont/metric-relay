@@ -5,7 +5,6 @@ use bytes::Buf;
 mod frame;
 mod rtcifier;
 mod generators;
-mod bme280;
 mod stream;
 
 pub use frame::{

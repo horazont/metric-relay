@@ -20,6 +20,8 @@ mod pubsub;
 mod fft;
 #[cfg(feature = "summary")]
 mod summary;
+#[cfg(feature = "smbus")]
+mod smbus;
 
 pub use traits::{Source, Sink, Node};
 pub use config::{Config, BuildError};

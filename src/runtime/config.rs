@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::fmt;
 use std::error::Error;
 use std::net;
+use std::path::PathBuf;
 use std::ops::{Deref, DerefMut};
 #[cfg(feature = "debug")]
 use std::time;
@@ -30,6 +31,8 @@ use super::pubsub;
 use super::fft;
 #[cfg(feature = "summary")]
 use super::summary;
+#[cfg(feature = "smbus")]
+use super::smbus;
 
 #[cfg(feature = "debug")]
 use crate::stream;
@@ -252,6 +255,22 @@ impl InfluxDBMapping {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub enum BME280Instance {
+	Primary,
+	Secondary,
+}
+
+impl BME280Instance {
+	fn addr(&self) -> u8 {
+		match self {
+			Self::Primary => 0x76,
+			Self::Secondary => 0x77,
+		}
+	}
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "class")]
 pub enum Node {
 	SBX{
@@ -303,6 +322,13 @@ pub enum Node {
 	},
 	Summary{
 		size: usize,
+	},
+	BME280{
+		device: PathBuf,
+		path_prefix: String,
+		instance: BME280Instance,
+		interval: u32,
+		reconfigure_each: Option<u32>,
 	},
 }
 
@@ -395,7 +421,7 @@ impl Node {
 				{
 					let _ = peer_address;
 					Err(BuildError::FeatureNotAvailable{
-						which: "Listen node".into(),
+						which: "Connect node".into(),
 						feature_name: "relay",
 					})
 				}
@@ -515,6 +541,30 @@ impl Node {
 					})
 				}
 			},
+			Self::BME280{device, path_prefix, instance, interval, reconfigure_each} => {
+				#[cfg(feature = "smbus")]
+				{
+					let node = match smbus::BME280::new(
+						device,
+						instance.addr(),
+						path_prefix.into(),
+						std::time::Duration::from_millis(*interval as u64),
+						reconfigure_each.unwrap_or(1024) as usize,
+					) {
+						Ok(v) => v,
+						Err(e) => return Err(BuildError::Other(Box::new(e))),
+					};
+					Ok(traits::Node::from_source(node))
+				}
+				#[cfg(not(feature = "smbus"))]
+				{
+					let _ = (device, path_prefix, instance, interval, reconfigure_each);
+					Err(BuildError::FeatureNotAvailable{
+						which: "BME280 node".into(),
+						feature_name: "smbus",
+					})
+				}
+			}
 		}
 	}
 }

@@ -14,3 +14,7 @@ pub mod influxdb;
 #[cfg(feature = "pubsub")]
 pub mod pubsub;
 pub mod stream;
+#[cfg(any(feature = "smbus", feature = "sbx"))]
+pub mod bme280;
+#[cfg(feature = "smbus")]
+pub mod smbus;

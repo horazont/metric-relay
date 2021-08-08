@@ -136,4 +136,23 @@ impl Readout {
 		let H = self.get_humidity(c, t_fine);
 		(T, P, H)
 	}
+
+	/// Decode the raw values into floating point numbers.
+	///
+	/// Returns a triple:
+	/// - temperature as °C
+	/// - pressure as Pa
+	/// - humidity as %rH
+	pub fn decodef(&self, c: &CalibrationData) -> (f64, f64, f64) {
+		let (T, P, H) = self.decode(c);
+		(
+			(T as f64) / 100.0,
+			(P as f64) / 256.0,
+			(H as f64) / 1024.0,
+		)
+	}
 }
+
+pub static TEMPERATURE_COMPONENT: &'static str = "temperature";
+pub static PRESSURE_COMPONENT: &'static str = "pressure";
+pub static HUMIDITY_COMPONENT: &'static str = "humidity";
