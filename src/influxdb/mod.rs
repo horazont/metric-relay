@@ -28,9 +28,9 @@ impl Auth {
 	pub fn apply(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 		match self {
 			Self::None => req,
-			Self::HTTP{username, password} => req.header("Authorization", base64::encode(format!(
+			Self::HTTP{username, password} => req.header("Authorization", format!("Basic {}", base64::encode(format!(
 				"{}:{}", username, password,
-			))),
+			)))),
 			Self::Query{username, password} => req.query(&[("u", username), ("p", password)]),
 		}
 	}
