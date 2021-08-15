@@ -33,6 +33,10 @@ use super::fft;
 use super::summary;
 #[cfg(feature = "smbus")]
 use super::smbus;
+#[cfg(feature = "stream-filearchive")]
+use super::stream as runtime_stream;
+#[cfg(feature = "detrend")]
+use super::detrend;
 
 #[cfg(feature = "debug")]
 use crate::stream;
@@ -117,6 +121,37 @@ impl<'de> DeserializeTrait<'de> for PatternWrap {
         let s = String::deserialize(deserializer)?;
         let pattern = s.parse::<glob::Pattern>().map_err(de::Error::custom)?;
         Ok(PatternWrap(pattern))
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg(feature = "regex")]
+pub struct RegexWrap(pub regex::Regex);
+
+#[cfg(feature = "regex")]
+impl Deref for RegexWrap {
+	type Target = regex::Regex;
+
+	fn deref(&self) -> &regex::Regex {
+		&self.0
+	}
+}
+
+#[cfg(feature = "regex")]
+impl DerefMut for RegexWrap {
+	fn deref_mut(&mut self) -> &mut regex::Regex {
+		&mut self.0
+	}
+}
+
+#[cfg(feature = "regex")]
+impl<'de> DeserializeTrait<'de> for RegexWrap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
+    {
+        let s = String::deserialize(deserializer)?;
+        let pattern = s.parse::<regex::Regex>().map_err(de::Error::custom)?;
+        Ok(RegexWrap(pattern))
     }
 }
 
@@ -235,6 +270,13 @@ pub enum InfluxDBMapping {
 		tag: String,
 		field: String,
 	},
+	#[cfg(feature = "regex")]
+	TagToField{
+		predicate: Option<InfluxDBPredicate>,
+		expr: RegexWrap,
+		new_tag_value: String,
+		field_name: String,
+	},
 }
 
 #[cfg(feature = "influxdb")]
@@ -250,6 +292,17 @@ impl InfluxDBMapping {
 					field: field.clone().into(),
 				}))
 			},
+			#[cfg(feature = "regex")]
+			Self::TagToField{predicate, expr, new_tag_value, field_name} => {
+				Ok(Box::new(crate::influxdb::TagToField{
+					predicate: predicate.clone().and_then(|cfg| {
+						Some(cfg.build())
+					}).unwrap_or_else(|| { crate::influxdb::Select::default() }),
+					expr: expr.0.clone(),
+					new_tag_value: new_tag_value.clone().into(),
+					field_name: field_name.clone().into(),
+				}))
+			},
 		}
 	}
 }
@@ -261,10 +314,28 @@ pub enum BME280Instance {
 }
 
 impl BME280Instance {
+	#[cfg(feature = "smbus")]
 	fn addr(&self) -> u8 {
 		match self {
 			Self::Primary => 0x76,
 			Self::Secondary => 0x77,
+		}
+	}
+}
+
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub enum DetrendMode {
+	Constant,
+	Linear,
+}
+
+#[cfg(feature = "detrend")]
+impl From<DetrendMode> for detrend::Mode {
+	fn from(other: DetrendMode) -> Self {
+		match other {
+			DetrendMode::Constant => Self::Constant,
+			DetrendMode::Linear => Self::Linear,
 		}
 	}
 }
@@ -329,6 +400,13 @@ pub enum Node {
 		instance: BME280Instance,
 		interval: u32,
 		reconfigure_each: Option<u32>,
+	},
+	#[cfg(feature = "stream-filearchive")]
+	SimpleFileArchive{
+		path: PathBuf,
+	},
+	Detrend{
+		mode: DetrendMode,
 	},
 }
 
@@ -564,7 +642,30 @@ impl Node {
 						feature_name: "smbus",
 					})
 				}
-			}
+			},
+			#[cfg(feature = "stream-filearchive")]
+			Self::SimpleFileArchive{path} => {
+				let dir = match openat::Dir::open(path) {
+					Ok(v) => v,
+					Err(e) => return Err(BuildError::Other(Box::new(e))),
+				};
+				let archive = Box::new(stream::SimpleFileArchive::new(dir, 0o640));
+				Ok(traits::Node::from_sink(runtime_stream::Archiver::new(archive)))
+			},
+			Self::Detrend{mode} => {
+				#[cfg(feature = "detrend")]
+				{
+					Ok(traits::Node::from(detrend::Detrend::new(mode.clone().into())))
+				}
+				#[cfg(not(feature = "detrend"))]
+				{
+					let _ = mode;
+					Err(BuildError::FeatureNotAvailable{
+						which: "Detrend node".into(),
+						feature_name: "detrend",
+					})
+				}
+			},
 		}
 	}
 }
@@ -607,6 +708,10 @@ pub enum Filter {
 		predicate: Option<FilterPredicate>,
 		component_name: String,
 	},
+	KeepComponent{
+		predicate: Option<FilterPredicate>,
+		component_name: String,
+	},
 	MapInstance{
 		predicate: Option<FilterPredicate>,
 		mapping: HashMap<SmartString, SmartString>,
@@ -645,6 +750,15 @@ impl Filter {
 			},
 			Self::DropComponent{predicate, component_name} => {
 				Ok(Box::new(filter::DropComponent{
+					predicate: match predicate {
+						Some(p) => p.build()?,
+						None => filter::SelectByPath::default(),
+					},
+					component_name: component_name.into(),
+				}))
+			},
+			Self::KeepComponent{predicate, component_name} => {
+				Ok(Box::new(filter::KeepComponent{
 					predicate: match predicate {
 						Some(p) => p.build()?,
 						None => filter::SelectByPath::default(),

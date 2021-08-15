@@ -14,6 +14,8 @@ mod filter;
 
 pub use readout::{Precision, Readout};
 pub use filter::{Transpose, Select, Filter};
+#[cfg(feature = "regex")]
+pub use filter::TagToField;
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

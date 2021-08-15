@@ -544,12 +544,12 @@ mod tests {
 		});
 
 		let send_sock = SendSocket::new(local_addr);
-		send_sock.send(frame::DataFrame::Readout(data.clone().into())).await;
+		send_sock.send(frame::DataFrame::Readout(vec![Arc::new(data.clone())].into())).await;
 
 		let received = recv_ch.recv().await;
 		match received {
 			Ok(frame::DataFrame::Readout(readout)) => {
-				assert_eq!(**readout, data);
+				assert_eq!(*readout[0], data);
 			},
 			other => panic!("unexpected reception: {:?}", other),
 		}

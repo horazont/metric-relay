@@ -22,6 +22,10 @@ mod fft;
 mod summary;
 #[cfg(feature = "smbus")]
 mod smbus;
+#[cfg(feature = "stream-filearchive")]
+mod stream;
+#[cfg(feature = "detrend")]
+mod detrend;
 
 pub use traits::{Source, Sink, Node};
 pub use config::{Config, BuildError};

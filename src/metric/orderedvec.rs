@@ -138,6 +138,10 @@ impl<K, V> OrderedVec<K, V> {
 	pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, (K, V)> {
 		self.0.drain(range)
 	}
+
+	pub fn retain<F: FnMut(&(K, V)) -> bool>(&mut self, f: F) {
+		self.0.retain(f)
+	}
 }
 
 impl<K, V> From<OrderedVec<K, V>> for Vec<(K, V)> {

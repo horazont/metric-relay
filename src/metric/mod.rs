@@ -8,6 +8,7 @@ use smartstring::alias::{String as SmartString};
 use serde_derive::{Deserialize, Serialize};
 
 mod orderedvec;
+mod maskedarray;
 
 pub use orderedvec::OrderedVec;
 

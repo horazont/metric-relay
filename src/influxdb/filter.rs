@@ -6,6 +6,9 @@ use smartstring::alias::{String as SmartString};
 
 use glob::{Pattern, MatchOptions};
 
+#[cfg(feature = "regex")]
+use regex::Regex;
+
 use super::readout::{Readout, Sample};
 
 
@@ -98,6 +101,55 @@ impl Filter for Transpose {
 		std::mem::swap(&mut new_samples, &mut readout_mut.samples);
 		readout_mut.fields.clear();
 		readout_mut.fields.push(self.field.clone());
+		Some(readout)
+	}
+}
+
+#[cfg(feature = "regex")]
+pub struct TagToField {
+	pub predicate: Select,
+	pub expr: Regex,
+	pub new_tag_value: SmartString,
+	pub field_name: SmartString,
+}
+
+#[cfg(feature = "regex")]
+impl Filter for TagToField {
+	fn process(&self, mut readout: Arc<Readout>) -> Option<Arc<Readout>> {
+		if !self.predicate.matches(&readout) {
+			return Some(readout)
+		}
+
+		if readout.fields.len() > 1 {
+			warn!("TagToField can only be used with single-field readouts; dropping");
+			return None;
+		}
+
+		if readout.tags.len() != 1 {
+			warn!("TagToField only supports samples with a single tag; dropping");
+			return None;
+		}
+
+		let readout_mut = Arc::make_mut(&mut readout);
+		readout_mut.fields.clear();
+		readout_mut.fields.reserve(readout_mut.samples.len());
+		let mut new_fieldv = Vec::with_capacity(readout_mut.samples.len());
+		let mut new_tagv = Vec::with_capacity(1);
+
+		for sample in readout_mut.samples.drain(..) {
+			let field_name = self.expr.replace(&sample.tagv[0][..], &self.field_name[..]).into();
+			if new_tagv.len() == 0 {
+				new_tagv.push(self.expr.replace(&sample.tagv[0][..], &self.new_tag_value[..]).into());
+			}
+			readout_mut.fields.push(field_name);
+			new_fieldv.push(sample.fieldv[0]);
+		}
+
+		readout_mut.samples.push(Sample{
+			fieldv: new_fieldv,
+			tagv: new_tagv,
+		});
+
 		Some(readout)
 	}
 }

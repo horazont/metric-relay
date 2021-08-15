@@ -36,6 +36,14 @@ use chrono::{Duration, DateTime, Utc, DurationRound};
 use crate::metric;
 use crate::serial::SerialNumber;
 
+mod archive;
+#[cfg(feature = "stream-filearchive")]
+mod filearchive;
+
+pub use archive::{ArchiveWrite, ArchiveError};
+#[cfg(feature = "stream-filearchive")]
+pub use filearchive::SimpleFileArchive;
+
 #[derive(Debug, Clone, Copy)]
 pub enum WriteError {
 	/// The timestamp of the block is too far in the past to be accepted.

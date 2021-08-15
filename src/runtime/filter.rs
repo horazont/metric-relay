@@ -210,6 +210,25 @@ impl Filter for DropComponent {
 	}
 }
 
+pub struct KeepComponent {
+	pub predicate: SelectByPath,
+	pub component_name: SmartString,
+}
+
+impl Filter for KeepComponent {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
+		if !self.predicate.matches_readout(&input) {
+			return Some(input)
+		}
+
+		if input.components.contains_key(&self.component_name) {
+			let input_mut = Arc::make_mut(&mut input);
+			input_mut.components.retain(|(k, _v)| { *k == self.component_name });
+		}
+		Some(input)
+	}
+}
+
 pub struct MapInstance {
 	pub predicate: SelectByPath,
 	pub mapping: HashMap<SmartString, SmartString>,
