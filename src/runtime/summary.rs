@@ -77,15 +77,14 @@ impl SummaryWorker {
 
 		match *block.data {
 			metric::RawData::I16(ref vec) => {
-				readouts.reserve(vec.len() / size);
-				for (i, chunk) in vec.chunks(size).enumerate() {
-					if chunk.len() != size {
-						warn!("partial chunk, data lost");
-						continue;
-					}
-
+				readouts.reserve((vec.len() + size - 1) / size);
+				let mut buffer = Vec::with_capacity(size);
+				for (i, chunk) in vec.unmasked_chunks(size).enumerate() {
 					let t = block.t0 + (period * (i * size) as i32);
-					readouts.push(Self::process_chunk(t, &block.path, chunk, &block.scale));
+					buffer.extend(chunk);
+					if buffer.len() > 0 {
+						readouts.push(Self::process_chunk(t, &block.path, &buffer[..], &block.scale));
+					}
 				}
 			},
 		}

@@ -4,12 +4,13 @@ use std::cmp::PartialEq;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut, RangeBounds, Bound, Range};
 
-use bitvec::prelude::{BitVec, Lsb0};
+use bitvec::prelude::{BitVec, Lsb0, BitSlice};
 
 #[cfg(feature = "metric-serde")]
 use serde_derive::{Deserialize, Serialize};
 
 type MaskVec = BitVec<Lsb0, usize>;
+type MaskSlice = BitSlice<Lsb0, usize>;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
@@ -117,6 +118,15 @@ impl<T> MaskedArray<T> {
 		}
 	}
 
+	pub fn with_data(&self, other: Vec<T>) -> Self {
+		assert!(other.len() == self.values.len());
+		debug_assert!(self.values.len() == self.mask.len());
+		Self{
+			mask: self.mask.clone(),
+			values: other,
+		}
+	}
+
 	#[inline]
 	pub fn len(&self) -> usize {
 		debug_assert!(self.mask.len() == self.values.len());
@@ -159,6 +169,38 @@ impl<T> MaskedArray<T> {
 
 	pub fn get_mask(&self) -> &MaskVec {
 		&self.mask
+	}
+
+	pub fn iter_unmasked<'a>(&'a self) -> Unmasked<'a, T> {
+		Unmasked{
+			mask: &self.mask[..],
+			values: &self.values[..],
+			at: 0,
+		}
+	}
+
+	pub fn iter_unmasked_mut<'a>(&'a mut self, r: impl RangeBounds<usize>) -> UnmaskedMut<'a, T> {
+		let r = rangeify(self.mask.len(), r);
+		UnmaskedMut{
+			mask: &self.mask[r.clone()],
+			values: &mut self.values[r],
+		}
+	}
+
+	pub fn iter_unmasked_enumerated<'a>(&'a self) -> UnmaskedEnumerated<'a, T> {
+		UnmaskedEnumerated{
+			mask: &self.mask[..],
+			values: &self.values[..],
+			at: 0,
+		}
+	}
+
+	pub fn unmasked_chunks<'a>(&'a self, sz: usize) -> UnmaskedChunks<'a, T> {
+		UnmaskedChunks{
+			array: &self,
+			chunk_size: sz,
+			offset: 0,
+		}
 	}
 }
 
@@ -311,6 +353,121 @@ impl<'a, T: Clone + 'a> MaskedArrayWriter<T> {
 	}
 }
 
+pub struct Unmasked<'a, T> {
+	mask: &'a MaskSlice,
+	values: &'a [T],
+	at: usize,
+}
+
+impl<'a, T> Iterator for Unmasked<'a, T> {
+	type Item = &'a T;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let nvalues = self.values.len();
+		debug_assert!(nvalues == self.mask.len());
+		let mut at = self.at;
+		while at < nvalues && !self.mask[at] {
+			at += 1;
+		}
+		if at >= nvalues {
+			self.at = nvalues;
+			None
+		} else {
+			self.at = at + 1;
+			debug_assert!(self.mask[at]);
+			Some(&self.values[at])
+		}
+	}
+}
+
+pub struct UnmaskedMut<'a, T> {
+	mask: &'a MaskSlice,
+	values: &'a mut [T],
+}
+
+impl<'a, T> Iterator for UnmaskedMut<'a, T> {
+	type Item = &'a mut T;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let mut at = 0usize;
+		let nvalues = self.values.len();
+		debug_assert!(nvalues == self.mask.len());
+		while at < nvalues && !self.mask[at] {
+			at += 1;
+		}
+		if at >= nvalues {
+			self.mask = MaskSlice::empty();
+			self.values = &mut [];
+			None
+		} else {
+			// we need to exclude the selected item from the head slice, hence we add one
+			// this is okay, at < nvalues && nvalues == len and it is valid for at to be equal to len according to the split_at docs (the second slice will then simply be empty)
+			let splitpoint = at + 1;
+			debug_assert!(self.mask[at]);
+			self.mask = self.mask.split_at(splitpoint).1;
+			let (head, tail) = std::mem::take(&mut self.values).split_at_mut(splitpoint);
+			self.values = tail;
+			Some(&mut head[at])
+		}
+	}
+}
+
+pub struct UnmaskedEnumerated<'a, T> {
+	mask: &'a MaskSlice,
+	values: &'a [T],
+	at: usize,
+}
+
+impl<'a, T> Iterator for UnmaskedEnumerated<'a, T> {
+	type Item = (usize, &'a T);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let nvalues = self.values.len();
+		debug_assert!(nvalues == self.mask.len());
+		let mut at = self.at;
+		while at < nvalues && !self.mask[at] {
+			at += 1;
+		}
+		if at >= nvalues {
+			self.at = nvalues;
+			None
+		} else {
+			self.at = at + 1;
+			debug_assert!(self.mask[at]);
+			Some((at, &self.values[at]))
+		}
+	}
+}
+
+pub struct UnmaskedChunks<'a, T> {
+	array: &'a MaskedArray<T>,
+	chunk_size: usize,
+	offset: usize,
+}
+
+impl<'a, T> Iterator for UnmaskedChunks<'a, T> {
+	type Item = Unmasked<'a, T>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.offset >= self.array.len() {
+			return None
+		}
+
+		let rbegin = self.offset;
+		let next = self.offset + self.chunk_size;
+		let rend = next.min(self.array.len());
+		let r = rbegin..rend;
+
+		let result = Unmasked{
+			mask: &self.array.mask[r.clone()],
+			values: &self.array.values[r],
+			at: 0,
+		};
+		self.offset = next;
+		Some(result)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -345,7 +502,7 @@ mod tests {
 	#[test]
 	fn test_write_clone_unmasks() {
 		let mut arr = MaskedArray::masked_with_value(16, 0u8);
-		let mut src = vec![1u8, 2u8, 3u8];
+		let src = vec![1u8, 2u8, 3u8];
 		arr.write_clone(2, src.iter());
 		assert_eq!(arr[2], 1u8);
 		assert_eq!(arr[3], 2u8);
@@ -355,6 +512,63 @@ mod tests {
 		assert!(!arr.masked(3));
 		assert!(!arr.masked(4));
 		assert!(arr.masked(5));
+	}
+
+	#[test]
+	fn test_iter_unmasked() {
+		let mut arr = MaskedArray::masked_with_value(16, 2342u16);
+		assert_eq!(Vec::<u16>::new(), arr.iter_unmasked().map(|x| { *x }).collect::<Vec<_>>());
+		arr.unmask(10..11);
+		assert_eq!(vec![2342u16], arr.iter_unmasked().map(|x| { *x }).collect::<Vec<_>>());
+		arr.write_clone(2, (&[2u16, 3u16, 4u16][..]).iter());
+		assert_eq!(vec![2, 3, 4, 2342u16], arr.iter_unmasked().map(|x| { *x }).collect::<Vec<_>>());
+	}
+
+	#[test]
+	fn test_iter_unmasked_enumerated() {
+		let mut arr = MaskedArray::masked_with_value(16, 2342u16);
+		{
+			let mut iter = arr.iter_unmasked_enumerated();
+			assert!(iter.next().is_none());
+		}
+		arr.unmask(10..11);
+		{
+			let mut iter = arr.iter_unmasked_enumerated();
+			assert!(iter.next().unwrap() == (10, &2342u16));
+			assert!(iter.next().is_none());
+		}
+		arr.write_clone(2, (&[5u16, 6u16, 7u16][..]).iter());
+		{
+			let mut iter = arr.iter_unmasked_enumerated();
+			assert!(iter.next().unwrap() == (2, &5u16));
+			assert!(iter.next().unwrap() == (3, &6u16));
+			assert!(iter.next().unwrap() == (4, &7u16));
+			assert!(iter.next().unwrap() == (10, &2342u16));
+			assert!(iter.next().is_none());
+		}
+	}
+
+	#[test]
+	fn test_iter_unmasked_chunks_completely_unmasked() {
+		let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15u8];
+		let arr: MaskedArray<_> = data.clone().into();
+		for (chiter, chunk) in arr.unmasked_chunks(4).zip(data.chunks(4)) {
+			let from_marr: Vec<_> = chiter.map(|x| {*x}).collect();
+			assert_eq!(&from_marr[..], &chunk[..]);
+		}
+	}
+
+	#[test]
+	fn test_iter_unmasked_chunks_with_holes() {
+		let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15u8];
+		let mut arr: MaskedArray<_> = data.clone().into();
+		arr.mask(1..3);
+		arr.mask(8..12);
+		let chunks: Vec<Vec<u8>> = arr.unmasked_chunks(4).map(|x| { x.map(|y| {*y}).collect::<Vec<_>>() }).collect();
+		assert_eq!(chunks[0], vec![1, 4u8]);
+		assert_eq!(chunks[1], vec![5, 6, 7, 8u8]);
+		assert_eq!(chunks[2], Vec::<u8>::new());
+		assert_eq!(chunks[3], vec![13, 14, 15u8]);
 	}
 
 	#[test]

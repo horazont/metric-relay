@@ -25,15 +25,14 @@ struct DetrendWorker {
 	mode: Mode,
 }
 
-fn linear_regression<'a>(vs: impl Iterator<Item = &'a f32>) -> (f32, f32) {
+fn linear_regression<'a>(vs: impl Iterator<Item = &'a (f32, f32)>) -> (f32, f32) {
 	let mut prodsum = 0f32;
 	let mut xsum = 0f32;
 	let mut ysum = 0f32;
 	let mut xsqsum = 0f32;
 	let mut n = 0;
 
-	for y in vs {
-		let x = n as f32;
+	for (x, y) in vs {
 		n += 1;
 		prodsum += x*y;
 		xsum += x;
@@ -47,26 +46,25 @@ fn linear_regression<'a>(vs: impl Iterator<Item = &'a f32>) -> (f32, f32) {
 	(alpha, beta)
 }
 
-fn debias<'x>(ys: &'x mut [f32]) {
+fn debias<'x>(ps: &'x mut [(f32, f32)]) {
 	let mut ysum = 0f32;
 	let mut n = 0usize;
-	for y in ys.iter() {
+	for (_, y) in ps.iter() {
 		ysum += *y;
 		n += 1;
 	}
 
 	let n = n as f32;
 	let avg = ysum / n;
-	for y in ys.iter_mut() {
+	for (_, y) in ps.iter_mut() {
 		*y = *y - avg;
 	}
 }
 
-fn detrend<'x>(ys: &'x mut [f32]) {
-	let (alpha, beta) = linear_regression(ys.iter());
-	for (x, y) in ys.iter_mut().enumerate() {
-		let x = x as f32;
-		*y = *y - (alpha + x * beta);
+fn detrend<'x>(ps: &'x mut [(f32, f32)]) {
+	let (alpha, beta) = linear_regression(ps.iter());
+	for (x, y) in ps.iter_mut() {
+		*y = *y - (alpha + *x * beta);
 	}
 }
 
@@ -93,14 +91,16 @@ impl DetrendWorker {
 			mode: Mode)
 	{
 		// TODO: take masking into account then
-		let mut floats: Vec<_> = match *block.data {
+		let mut coords: Vec<_> = match *block.data {
 			metric::RawData::I16(ref vs) => {
-				vs.iter().map(|x| { *x as f32 }).collect()
+				vs.iter_unmasked_enumerated().map(|(i, v)| {
+					(i as f32, *v as f32)
+				}).collect()
 			},
 		};
 		match mode {
-			Mode::Constant => debias(&mut floats[..]),
-			Mode::Linear => detrend(&mut floats[..]),
+			Mode::Constant => debias(&mut coords[..]),
+			Mode::Linear => detrend(&mut coords[..]),
 		};
 		let result = Arc::new(metric::StreamBlock{
 			t0: block.t0,
@@ -109,12 +109,12 @@ impl DetrendWorker {
 			path: block.path.clone(),
 			scale: block.scale.clone(),
 			data: Arc::new(match *block.data {
-				metric::RawData::I16(_) => {
-					metric::RawData::I16(
-						floats.iter().map(|x| {
-							x.min(i16::MAX as f32).max(i16::MIN as f32) as i16
-						}).collect()
-					)
+				metric::RawData::I16(ref vs) => {
+					let mut vs = vs.clone();
+					for (dest, (_, y)) in vs.iter_unmasked_mut(..).zip(coords.iter()) {
+						*dest = y.min(i16::MAX as f32).max(i16::MIN as f32) as i16
+					};
+					metric::RawData::I16(vs)
 				},
 			}),
 		});
@@ -194,7 +194,7 @@ mod tests {
 
 	#[test]
 	fn test_linear_regression_trivial() {
-		let vs = vec![0., 1., 2.];
+		let vs = vec![(0., 0.), (1., 1.), (2., 2.)];
 		let (alpha, beta) = linear_regression(vs.iter());
 		assert_eq!(beta, 1.);
 		assert_eq!(alpha, 0.);
@@ -202,7 +202,7 @@ mod tests {
 
 	#[test]
 	fn test_linear_regression() {
-		let vs = vec![1.0, 1.5, 2.0];
+		let vs = vec![(0., 1.0), (1., 1.5), (2., 2.0)];
 		let (alpha, beta) = linear_regression(vs.iter());
 		assert_eq!(beta, 0.5);
 		assert_eq!(alpha, 1.0);
@@ -210,7 +210,7 @@ mod tests {
 
 	#[test]
 	fn test_linear_regression_negative() {
-		let vs = vec![-1.0, -1.5, -2.0];
+		let vs = vec![(0., -1.0), (1., -1.5), (2., -2.0)];
 		let (alpha, beta) = linear_regression(vs.iter());
 		assert_eq!(beta, -0.5);
 		assert_eq!(alpha, -1.0);
@@ -218,7 +218,7 @@ mod tests {
 
 	#[test]
 	fn test_linear_regression_flat() {
-		let vs = vec![-1.0, -1.0, -1.0];
+		let vs = vec![(0., -1.0), (1., -1.0), (2., -1.0)];
 		let (alpha, beta) = linear_regression(vs.iter());
 		assert_eq!(beta, 0.);
 		assert_eq!(alpha, -1.0);
@@ -226,18 +226,18 @@ mod tests {
 
 	#[test]
 	fn test_detrend_flat() {
-		let mut vs = vec![-1.0, -1.0, -1.0];
+		let mut vs = vec![(0., -1.0), (1., -1.0), (2., -1.0)];
 		detrend(&mut vs[..]);
-		for v in vs {
+		for (_, v) in vs {
 			assert_eq!(v, 0.);
 		}
 	}
 
 	#[test]
 	fn test_detrend_linear() {
-		let mut vs = vec![-1.0, 0.0, 1.0];
+		let mut vs = vec![(0., -1.0), (1., 0.0), (2., 1.0)];
 		detrend(&mut vs[..]);
-		for v in vs {
+		for (_, v) in vs {
 			assert_eq!(v, 0.);
 		}
 	}
@@ -245,7 +245,7 @@ mod tests {
 	#[test]
 	#[ignore]
 	fn test_detrend_sine() {
-		let mut vs = vec![0., 1., 0., -1.];
+		let mut vs = vec![(0., 0.), (1., 1.), (2., 0.), (3., -1.)];
 		let base = vs.clone();
 		detrend(&mut vs[..]);
 		assert_eq!(vs, base);
@@ -255,32 +255,32 @@ mod tests {
 	#[test]
 	#[ignore]
 	fn test_detrend_sine_with_linear_trend() {
-		let base = vec![0., 1., 0., -1.];
-		let mut vs = vec![0., 1.5, 1.0, 0.5];
+		let base = vec![(0., 0.), (1., 1.), (2., 0.), (3., -1.)];
+		let mut vs = vec![(0., 0.), (1., 1.5), (2., 1.0), (3., 0.5)];
 		detrend(&mut vs[..]);
 		assert_eq!(vs, base);
 	}
 
 	#[test]
 	fn test_debias_flat() {
-		let mut vs = vec![-1.0, -1.0, -1.0];
+		let mut vs = vec![(0., -1.0), (1., -1.0), (2., -1.0)];
 		debias(&mut vs[..]);
-		for v in vs {
+		for (_, v) in vs {
 			assert_eq!(v, 0.);
 		}
 	}
 
 	#[test]
 	fn test_debias_linear() {
-		let mut vs = vec![0.0, 1.0, 2.0];
-		let reference = vec![-1.0, 0.0, 1.0];
+		let mut vs = vec![(0., -1.0), (1., 0.0), (2., 1.0)];
+		let reference = vec![(0., -1.0), (1., 0.0), (2., 1.0)];
 		debias(&mut vs[..]);
 		assert_eq!(vs, reference);
 	}
 
 	#[test]
 	fn test_debias_sine() {
-		let mut vs = vec![0., 1., 0., -1.];
+		let mut vs = vec![(0., 0.), (1., 1.), (2., 0.), (3., -1.)];
 		let base = vs.clone();
 		debias(&mut vs[..]);
 		assert_eq!(vs, base);
@@ -288,8 +288,8 @@ mod tests {
 
 	#[test]
 	fn test_debias_sine_with_constant_offset() {
-		let base = vec![0., 1., 0., -1.];
-		let mut vs = vec![0.5, 1.5, 0.5, -0.5];
+		let base = vec![(0., 0.), (1., 1.), (2., 0.), (3., -1.)];
+		let mut vs = vec![(0., 0.5), (1., 1.5), (2., 0.5), (3., -0.5)];
 		debias(&mut vs[..]);
 		assert_eq!(vs, base);
 	}
