@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use std::time::Duration;
 use smartstring::alias::{String as SmartString};
 
+#[cfg(feature = "metric-serde")]
 use serde_derive::{Deserialize, Serialize};
 
 mod orderedvec;
@@ -12,7 +13,8 @@ mod maskedarray;
 
 pub use orderedvec::OrderedVec;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub enum Unit {
 	// other
 	Arbitrary,
@@ -82,7 +84,8 @@ impl fmt::Display for Unit {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct DevicePath {
 	/// Type of device which was read
 	// e.g. lsm303d
@@ -98,13 +101,15 @@ impl fmt::Display for DevicePath {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct Value {
 	pub magnitude: f64,
 	pub unit: Unit,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct Readout {
 	/// Timestamp of the readout
 	pub timestamp: DateTime<Utc>,
@@ -122,7 +127,8 @@ pub struct Sample {
 	pub value: Value,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub enum StreamFormat {
 	/* I8,
 	U8, */
@@ -136,7 +142,8 @@ pub enum StreamFormat {
 	F64, */
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub enum RawData {
 	/* I8(Vec<i8>),
 	U8(Vec<u8>), */
@@ -158,7 +165,8 @@ impl RawData {
 	}
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct StreamBlock {
 	pub t0: DateTime<Utc>,
 	pub path: DevicePath,
