@@ -1,9 +1,10 @@
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::Arc;
 
 use smartstring::alias::{String as SmartString};
 
-use log::{debug, warn};
+use log::{debug, warn, trace};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -14,6 +15,7 @@ use num_traits::Zero;
 use rustfft::{FftPlanner, num_complex::Complex, Fft as FftImpl};
 
 use crate::metric;
+use crate::metric::MaskedArray;
 
 use super::payload;
 use super::adapter::Serializer;
@@ -23,6 +25,20 @@ struct FftWorker {
 	inner: Arc<dyn FftImpl<f32>>,
 	source: mpsc::Receiver<payload::Stream>,
 	sink: broadcast::Sender<payload::Sample>,
+}
+
+fn masked_re_avg(r: Range<usize>, ma: &MaskedArray<Complex<f32>>) -> Option<f32> {
+	let mut nvalid = 0usize;
+	let mut sum = 0f32;
+	for v in ma.iter_unmasked(r) {
+		nvalid += 1;
+		sum += v.re;
+	}
+	if nvalid == 0 {
+		None
+	} else {
+		Some(sum / nvalid as f32)
+	}
 }
 
 impl FftWorker {
@@ -37,20 +53,42 @@ impl FftWorker {
 		});
 	}
 
-	fn process(batch: payload::Stream, fft: Arc<dyn FftImpl<f32>>) -> Vec<(i64, Vec<f32>)> {
-		let mut samples: Vec<_> = match *batch.data {
-			metric::RawData::I16(ref v) => v.iter().map(|x| { Complex{re: *x as f32 / i16::MAX as f32, im: 0.0} }).collect(),
+	fn process(batch: payload::Stream, fft: Arc<dyn FftImpl<f32>>) -> Vec<(usize, Vec<f32>)> {
+		let samples: MaskedArray<Complex<f32>> = match *batch.data {
+			metric::RawData::I16(ref v) => v.with_data(v.iter().map(|x| { Complex{re: *x as f32 / i16::MAX as f32, im: 0.0} }).collect()),
 		};
-		let mut offset = 0;
+		let mut offset = 0usize;
 
 		let mut scratchspace = Vec::new();
 		scratchspace.resize(fft.get_inplace_scratch_len(), Complex::zero());
 		let mut data = Vec::with_capacity(fft.len());
 		let mut result = Vec::new();
 		let scale = fft.len() as f32 / 2.0;
-		while samples.len() >= fft.len() {
+		while offset < samples.len() {
+			let r = offset..(offset + fft.len());
+			if r.end > samples.len() {
+				break
+			}
 			data.clear();
-			data.extend(samples.drain(0..fft.len()));
+
+			if !samples.get_mask()[r.clone()].all() {
+				// not all values are valid, we have to fill the remaining ones. we use the average, because that will at least avoid any stray DC component. it will still cause havoc in the higher frequencies though
+				let avg = match masked_re_avg(r.clone(), &samples) {
+					Some(v) => v,
+					// *no* value is valid in this chunk, skip it altogether
+					None => {
+						trace!("dropping {} masked samples at {}/{}", fft.len(), offset, samples.len());
+						offset += fft.len();
+						continue
+					},
+				};
+				trace!("filled masked values of {} samples with avg {} at {}/{}", fft.len(), avg, offset, samples.len());
+				data.extend(samples.iter_filled(r.clone(), &Complex{re: avg, im: 0.}));
+			} else {
+				trace!("using {} samples as-is at {}/{}", fft.len(), offset, samples.len());
+				data.extend(samples[r].iter());
+			}
+
 			fft.process_with_scratch(
 				&mut data,
 				&mut scratchspace,
@@ -60,10 +98,11 @@ impl FftWorker {
 			pack[0] /= 2.0;
 			pack[npack] /= 2.0;
 			result.push((offset, pack));
-			offset += fft.len() as i64;
+			offset += fft.len();
 		}
-		if samples.len() > 0 {
-			warn!("fft dropped {} samples; please ensure that fft size is a multiple of the inbound stream block size", samples.len());
+
+		if let Some(dropped) = samples.len().checked_sub(offset).and_then(|x| { if x > 0 { Some(x) } else { None }}) {
+			warn!("fft dropped {} samples; please ensure that fft size is a multiple of the inbound stream block size", dropped);
 		}
 
 		result
@@ -82,6 +121,7 @@ impl FftWorker {
 			let mut result = {
 				let fft = self.inner.clone();
 				let batch = batch.clone();
+				trace!("spawning processor for batch with {} samples / fft size {}", batch.data.len(), fft.len());
 				match spawn_blocking(move || { Self::process(batch, fft) }).await {
 					Ok(v) => v,
 					Err(e) => {
@@ -94,7 +134,7 @@ impl FftWorker {
 			let window_offset = (self.inner.len() / 2) as i64;
 			let mut readouts = Vec::with_capacity(result.len());
 			for (offset, mut freq_magnitudes) in result.drain(..) {
-				let at = (offset + window_offset) as i32;
+				let at = (offset as i64 + window_offset) as i32;
 				let tc = batch.t0 + chrono::Duration::from_std(batch.period).unwrap() * at;
 				let mut components = metric::OrderedVec::new();
 				let max_freq = 1.0e9 / (batch.period.as_nanos() as f32) / 2.0;

@@ -118,10 +118,10 @@ impl<T> MaskedArray<T> {
 		}
 	}
 
-	pub fn with_data(&self, other: Vec<T>) -> Self {
+	pub fn with_data<O>(&self, other: Vec<O>) -> MaskedArray<O> {
 		assert!(other.len() == self.values.len());
 		debug_assert!(self.values.len() == self.mask.len());
-		Self{
+		MaskedArray{
 			mask: self.mask.clone(),
 			values: other,
 		}
@@ -171,10 +171,11 @@ impl<T> MaskedArray<T> {
 		&self.mask
 	}
 
-	pub fn iter_unmasked<'a>(&'a self) -> Unmasked<'a, T> {
+	pub fn iter_unmasked<'a>(&'a self, r: impl RangeBounds<usize>) -> Unmasked<'a, T> {
+		let r = rangeify(self.mask.len(), r);
 		Unmasked{
-			mask: &self.mask[..],
-			values: &self.values[..],
+			mask: &self.mask[r.clone()],
+			values: &self.values[r],
 			at: 0,
 		}
 	}
@@ -200,6 +201,17 @@ impl<T> MaskedArray<T> {
 			array: &self,
 			chunk_size: sz,
 			offset: 0,
+		}
+	}
+
+	pub fn iter_filled<'a>(&'a self, r: impl RangeBounds<usize>, fill: &'a T) -> Filled<'a, T> {
+		let len = self.mask.len();
+		let r = rangeify(len, r);
+		Filled{
+			mask: &self.mask[r.clone()],
+			values: &self.values[r],
+			at: 0,
+			fill,
 		}
 	}
 }
@@ -468,6 +480,32 @@ impl<'a, T> Iterator for UnmaskedChunks<'a, T> {
 	}
 }
 
+pub struct Filled<'a, T> {
+	mask: &'a MaskSlice,
+	values: &'a [T],
+	at: usize,
+	fill: &'a T,
+}
+
+impl<'a, T> Iterator for Filled<'a, T> {
+	type Item = &'a T;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let nvalues = self.values.len();
+		debug_assert!(nvalues == self.mask.len());
+		let at = self.at;
+		if at >= nvalues {
+			None
+		} else if self.mask[at] {
+			self.at += 1;
+			Some(&self.values[at])
+		} else {
+			self.at += 1;
+			Some(&self.fill)
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -517,11 +555,11 @@ mod tests {
 	#[test]
 	fn test_iter_unmasked() {
 		let mut arr = MaskedArray::masked_with_value(16, 2342u16);
-		assert_eq!(Vec::<u16>::new(), arr.iter_unmasked().map(|x| { *x }).collect::<Vec<_>>());
+		assert_eq!(Vec::<u16>::new(), arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
 		arr.unmask(10..11);
-		assert_eq!(vec![2342u16], arr.iter_unmasked().map(|x| { *x }).collect::<Vec<_>>());
+		assert_eq!(vec![2342u16], arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
 		arr.write_clone(2, (&[2u16, 3u16, 4u16][..]).iter());
-		assert_eq!(vec![2, 3, 4, 2342u16], arr.iter_unmasked().map(|x| { *x }).collect::<Vec<_>>());
+		assert_eq!(vec![2, 3, 4, 2342u16], arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
 	}
 
 	#[test]
