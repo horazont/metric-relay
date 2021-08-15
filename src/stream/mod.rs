@@ -28,6 +28,7 @@ this time, there is significant drift of the clock. Once a useful
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt;
+use std::sync::Arc;
 
 use log::{trace};
 
@@ -130,7 +131,7 @@ impl From<BufferedBlock> for metric::StreamBlock {
 			path: other.path,
 			period: other.period.to_std().unwrap(),
 			scale: other.scale,
-			data: metric::RawData::I16(other.data.into_inner()),
+			data: Arc::new(metric::RawData::I16(other.data.into_inner())),
 		}
 	}
 }
@@ -290,7 +291,7 @@ impl StreamBuffer for InMemoryBuffer {
 
 		let mut overhang: Vec<i16> = Vec::new();
 
-		match block.data {
+		match *block.data {
 			metric::RawData::I16(ref v) => {
 				next_block.data.copy_from_slice(&v[..max_take]);
 				if max_take < v.len() {
@@ -377,7 +378,7 @@ mod tests {
 				magnitude: 1.0,
 				unit: metric::Unit::Arbitrary,
 			},
-			data: metric::RawData::I16(data.into()),
+			data: Arc::new(metric::RawData::I16(data.into())),
 		}
 	}
 
@@ -417,7 +418,7 @@ mod tests {
 				assert_eq!(v.seq0, 65535-119);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 30, 0));
 				assert_eq!(v.data.len(), 600);
-				match v.data {
+				match *v.data {
 					metric::RawData::I16(ref v) => {
 						for (i, v) in v[..120].iter().enumerate() {
 							if *v != 0 {
@@ -436,7 +437,7 @@ mod tests {
 						}
 					},
 					#[allow(unreachable_patterns)]
-					other => panic!("unexpected raw data: {:?}", other),
+					ref other => panic!("unexpected raw data: {:?}", other),
 				}
 			},
 			other => panic!("unexpected read result: {:?}", other),
@@ -467,7 +468,7 @@ mod tests {
 				assert_eq!(v.seq0, 65535-119);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 30, 0));
 				assert_eq!(v.data.len(), 600);
-				match v.data {
+				match *v.data {
 					metric::RawData::I16(ref v) => {
 						for (i, v) in v[..120].iter().enumerate() {
 							if *v != 0 {
@@ -486,7 +487,7 @@ mod tests {
 						}
 					},
 					#[allow(unreachable_patterns)]
-					other => panic!("unexpected raw data: {:?}", other),
+					ref other => panic!("unexpected raw data: {:?}", other),
 				}
 			},
 			other => panic!("unexpected read result: {:?}", other),
@@ -508,7 +509,7 @@ mod tests {
 				assert_eq!(v.seq0, 65535-119);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 30, 0));
 				assert_eq!(v.data.len(), 600);
-				match v.data {
+				match *v.data {
 					metric::RawData::I16(ref v) => {
 						for (i, v) in v[..599].iter().enumerate() {
 							if *v != 0 {
@@ -522,7 +523,7 @@ mod tests {
 						}
 					},
 					#[allow(unreachable_patterns)]
-					other => panic!("unexpected raw data: {:?}", other),
+					ref other => panic!("unexpected raw data: {:?}", other),
 				}
 			},
 			other => panic!("unexpected read result: {:?}", other),
@@ -537,7 +538,7 @@ mod tests {
 				assert_eq!(v.seq0, 480);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 31, 0));
 				assert_eq!(v.data.len(), 600);
-				match v.data {
+				match *v.data {
 					metric::RawData::I16(ref v) => {
 						for (i, v) in v[..1].iter().enumerate() {
 							if *v != 2342 {
@@ -556,7 +557,7 @@ mod tests {
 						}
 					},
 					#[allow(unreachable_patterns)]
-					other => panic!("unexpected raw data: {:?}", other),
+					ref other => panic!("unexpected raw data: {:?}", other),
 				}
 			},
 			other => panic!("unexpected read result: {:?}", other),

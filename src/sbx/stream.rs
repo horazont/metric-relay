@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::io;
+use std::sync::Arc;
 use std::time::{Duration as StdDuration};
 
 use log::{warn};
@@ -247,7 +248,7 @@ impl<T: stream::StreamBuffer + Sync + Send + 'static> StreamDecoder<T> {
 			path: kind.into(),
 			period: self.period.clone(),
 			scale: self.scale.clone(),
-			data: metric::RawData::I16(samples.into()),
+			data: Arc::new(metric::RawData::I16(samples.into())),
 		}) {
 			Ok(()) => (),
 			Err(e) => warn!("sample failed to write to buffer: {}", e),

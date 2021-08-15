@@ -93,7 +93,7 @@ impl DetrendWorker {
 			mode: Mode)
 	{
 		// TODO: take masking into account then
-		let mut floats: Vec<_> = match block.data {
+		let mut floats: Vec<_> = match *block.data {
 			metric::RawData::I16(ref vs) => {
 				vs.iter().map(|x| { *x as f32 }).collect()
 			},
@@ -108,7 +108,7 @@ impl DetrendWorker {
 			period: block.period,
 			path: block.path.clone(),
 			scale: block.scale.clone(),
-			data: match block.data {
+			data: Arc::new(match *block.data {
 				metric::RawData::I16(_) => {
 					metric::RawData::I16(
 						floats.iter().map(|x| {
@@ -116,7 +116,7 @@ impl DetrendWorker {
 						}).collect()
 					)
 				},
-			},
+			}),
 		});
 		match sink.send(result) {
 			Ok(_) => (),

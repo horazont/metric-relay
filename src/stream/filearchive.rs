@@ -52,7 +52,7 @@ impl ArchiveWrite for SimpleFileArchive {
 		f.write_i64::<LittleEndian>(block.t0.timestamp())?;
 		f.write_u32::<LittleEndian>(block.t0.timestamp_subsec_nanos())?;
 		f.write_u128::<LittleEndian>(block.period.as_nanos())?;
-		match block.data {
+		match *block.data {
 			metric::RawData::I16(ref vs) => {
 				for v in vs.iter() {
 					f.write_i16::<LittleEndian>(*v)?;

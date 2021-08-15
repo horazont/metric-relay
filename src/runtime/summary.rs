@@ -75,7 +75,7 @@ impl SummaryWorker {
 		let period = Duration::from_std(block.period).unwrap();
 		let mut readouts = Vec::new();
 
-		match block.data {
+		match *block.data {
 			metric::RawData::I16(ref vec) => {
 				readouts.reserve(vec.len() / size);
 				for (i, chunk) in vec.chunks(size).enumerate() {

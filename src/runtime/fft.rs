@@ -45,7 +45,7 @@ impl FftWorker {
 			None => Vec::new(),
 		};
 
-		let samples = match batch.data {
+		let samples = match *batch.data {
 			metric::RawData::I16(ref v) => v.iter().map(|x| { Complex{re: *x as f32 / i16::MAX as f32, im: 0.0} }),
 		};
 		let mut offset = -(overhang.len() as i64);

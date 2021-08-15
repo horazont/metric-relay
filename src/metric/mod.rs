@@ -1,5 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use std::time::Duration;
@@ -174,5 +175,5 @@ pub struct StreamBlock {
 	pub seq0: u16,
 	pub period: Duration,
 	pub scale: Value,
-	pub data: RawData,
+	pub data: Arc<RawData>,
 }
