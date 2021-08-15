@@ -214,7 +214,7 @@ impl<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> SineSourceWorker<
 				path: self.path.clone(),
 				period: self.sample_period,
 				scale: self.scale.clone(),
-				data: metric::RawData::I16(buf),
+				data: metric::RawData::I16(buf.into()),
 			})) {
 				Ok(_) => (),
 				Err(BufferedStreamError::BufferWriteError(e)) => {

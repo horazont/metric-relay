@@ -57,7 +57,7 @@ relay = ["bincode", "tokio-util", "futures", "tokio/net", "rand", "metric-serde"
 smbus = ["i2c-linux"]
 stream-filearchive = ["openat", "percent-encoding"]
 detrend = []
-metric-serde = []
+metric-serde = ["bitvec/serde"]
 default = ["numerics", "influxdb", "pubsub", "sbx", "relay", "debug", "smbus", "http-tls", "regex", "stream-filearchive"]
 http-tls = ["reqwest/rustls-tls"]
 

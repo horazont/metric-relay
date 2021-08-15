@@ -247,7 +247,7 @@ impl<T: stream::StreamBuffer + Sync + Send + 'static> StreamDecoder<T> {
 			path: kind.into(),
 			period: self.period.clone(),
 			scale: self.scale.clone(),
-			data: metric::RawData::I16(samples),
+			data: metric::RawData::I16(samples.into()),
 		}) {
 			Ok(()) => (),
 			Err(e) => warn!("sample failed to write to buffer: {}", e),

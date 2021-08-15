@@ -34,6 +34,7 @@ use log::{trace};
 use chrono::{Duration, DateTime, Utc, DurationRound};
 
 use crate::metric;
+use crate::metric::{MaskedArray, MaskedArrayWriter};
 use crate::serial::SerialNumber;
 
 mod archive;
@@ -118,7 +119,7 @@ struct BufferedBlock {
 	period: Duration,
 	scale: metric::Value,
 	// TODO: generalize on the data type; could be done by extending and using RawData accordingly
-	data: Vec<i16>,
+	data: MaskedArrayWriter<i16>,
 }
 
 impl From<BufferedBlock> for metric::StreamBlock {
@@ -129,7 +130,7 @@ impl From<BufferedBlock> for metric::StreamBlock {
 			path: other.path,
 			period: other.period.to_std().unwrap(),
 			scale: other.scale,
-			data: metric::RawData::I16(other.data),
+			data: metric::RawData::I16(other.data.into_inner()),
 		}
 	}
 }
@@ -242,7 +243,7 @@ impl StreamBuffer for InMemoryBuffer {
 					seq0: out_block_seq0,
 					path: block.path.clone(),
 					scale: block.scale.clone(),
-					data: Vec::with_capacity(samples_per_block),
+					data: MaskedArray::masked_with_value(samples_per_block, 0).into(),
 				});
 				self.update_reference();
 				self.next_block.as_mut().unwrap()
@@ -254,7 +255,6 @@ impl StreamBuffer for InMemoryBuffer {
 				drop(v);
 				let mut next_block = self.next_block.take().unwrap();
 				// TODO: smarter interpolation
-				next_block.data.resize(next_block.data.capacity(), 0);
 				self.emit_blocks.push_back(next_block.into());
 
 				trace!("starting new block at t0 = {} [mismatching parameters]", out_block_t0);
@@ -264,7 +264,7 @@ impl StreamBuffer for InMemoryBuffer {
 					seq0: out_block_seq0,
 					path: block.path.clone(),
 					scale: block.scale.clone(),
-					data: Vec::with_capacity(samples_per_block),
+					data: MaskedArray::masked_with_value(samples_per_block, 0).into(),
 				});
 				self.update_reference();
 				self.next_block.as_mut().unwrap()
@@ -274,11 +274,11 @@ impl StreamBuffer for InMemoryBuffer {
 		let relative_in_seq0 = (in_block_seq0 - next_block.seq0) as usize;
 		let relative_in_seq1 = relative_in_seq0 + block.data.len();
 		assert!(relative_in_seq0 < next_block.data.capacity());
-		if relative_in_seq0 < next_block.data.len() {
+		if relative_in_seq0 < next_block.data.cursor() {
 			// we have this data already, drop it
 			return Err(WriteError::InThePast);
 		}
-		next_block.data.resize(relative_in_seq0, 0);
+		next_block.data.setpos(relative_in_seq0);
 
 		let max_take = if relative_in_seq1 < next_block.data.capacity() {
 			relative_in_seq1 - relative_in_seq0
@@ -292,7 +292,7 @@ impl StreamBuffer for InMemoryBuffer {
 
 		match block.data {
 			metric::RawData::I16(ref v) => {
-				next_block.data.extend(&v[..max_take]);
+				next_block.data.copy_from_slice(&v[..max_take]);
 				if max_take < v.len() {
 					overhang.reserve(samples_per_block);
 					overhang.extend(&v[max_take..]);
@@ -300,7 +300,7 @@ impl StreamBuffer for InMemoryBuffer {
 			}
 		}
 
-		if next_block.data.len() == next_block.data.capacity() {
+		if next_block.data.cursor() == next_block.data.capacity() {
 			// emit the block
 			drop(next_block);
 			self.emit_blocks.push_back(self.next_block.take().unwrap().into());
@@ -321,7 +321,11 @@ impl StreamBuffer for InMemoryBuffer {
 				seq0: out_block_seq0 + (samples_per_block as u16),
 				path: block.path.clone(),
 				scale: block.scale.clone(),
-				data: overhang,
+				data: {
+					let mut data: MaskedArrayWriter<_> = MaskedArray::masked_with_value(samples_per_block, 0).into();
+					data.copy_from_slice(&overhang[..]);
+					data
+				},
 			});
 			self.update_reference();
 		}
@@ -373,7 +377,7 @@ mod tests {
 				magnitude: 1.0,
 				unit: metric::Unit::Arbitrary,
 			},
-			data: metric::RawData::I16(data),
+			data: metric::RawData::I16(data.into()),
 		}
 	}
 

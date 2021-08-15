@@ -12,7 +12,7 @@ mod orderedvec;
 mod maskedarray;
 
 pub use orderedvec::OrderedVec;
-pub use maskedarray::MaskedArray;
+pub use maskedarray::{MaskedArray, MaskedArrayWriter};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
@@ -146,16 +146,16 @@ pub enum StreamFormat {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub enum RawData {
-	/* I8(Vec<i8>),
-	U8(Vec<u8>), */
-	I16(Vec<i16>),
-	/* U16(Vec<u16>),
-	I32(Vec<i32>),
-	U32(Vec<u32>),
-	I64(Vec<i64>),
-	U64(Vec<u64>),
-	F32(Vec<f32>),
-	F64(Vec<f64>), */
+	/* I8(MaskedArray<i8>),
+	U8(MaskedArray<u8>), */
+	I16(MaskedArray<i16>),
+	/* U16(MaskedArray<u16>),
+	I32(MaskedArray<i32>),
+	U32(MaskedArray<u32>),
+	I64(MaskedArray<i64>),
+	U64(MaskedArray<u64>),
+	F32(MaskedArray<f32>),
+	F64(MaskedArray<f64>), */
 }
 
 impl RawData {

@@ -1,13 +1,18 @@
 #![allow(dead_code)]
 use std::borrow::Borrow;
 use std::cmp::PartialEq;
+use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut, RangeBounds, Bound, Range};
 
 use bitvec::prelude::{BitVec, Lsb0};
 
+#[cfg(feature = "metric-serde")]
+use serde_derive::{Deserialize, Serialize};
+
 type MaskVec = BitVec<Lsb0, usize>;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct MaskedArray<T> {
 	mask: MaskVec,
 	values: Vec<T>,
@@ -103,6 +108,15 @@ fn rangeify(l: usize, range: impl RangeBounds<usize>) -> Range<usize> {
 }
 
 impl<T> MaskedArray<T> {
+	pub fn from_unmasked_vec(values: Vec<T>) -> Self {
+		let mut mask = BitVec::with_capacity(values.len());
+		mask.resize(values.len(), true);
+		Self{
+			mask,
+			values,
+		}
+	}
+
 	#[inline]
 	pub fn len(&self) -> usize {
 		debug_assert!(self.mask.len() == self.values.len());
@@ -149,6 +163,20 @@ impl<T> MaskedArray<T> {
 	}
 }
 
+impl<T> FromIterator<T> for MaskedArray<T> {
+	fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+		let mut vec: Vec<T> = iter.into_iter().collect();
+		vec.shrink_to_fit();
+		Self::from_unmasked_vec(vec)
+	}
+}
+
+impl<T> From<Vec<T>> for MaskedArray<T> {
+	fn from(other: Vec<T>) -> Self {
+		Self::from_unmasked_vec(other)
+	}
+}
+
 impl<T: Clone> MaskedArray<T> {
 	pub fn write_clone<I: Iterator<Item = V>, V: Borrow<T>>(&mut self, at: usize, iter: I) {
 		let mut n = 0;
@@ -175,6 +203,7 @@ impl<T> DerefMut for MaskedArray<T> {
 	}
 }
 
+#[derive(Debug, Clone)]
 pub struct MaskedArrayWriter<T> {
 	inner: MaskedArray<T>,
 	cursor: usize,
@@ -200,7 +229,7 @@ impl<T> MaskedArrayWriter<T> {
 		self.cursor
 	}
 
-	pub fn len(&self) -> usize {
+	pub fn capacity(&self) -> usize {
 		self.inner.len()
 	}
 
@@ -219,9 +248,9 @@ impl<T> MaskedArrayWriter<T> {
 	}
 
 	pub fn write_from<I: Iterator<Item = T>>(&mut self, iter: I) -> usize {
-		let mut n = 0;
-		for (offset, src) in iter.enumerate() {
-			let index = match offset.checked_add(self.cursor) {
+		let mut n = 0usize;
+		for src in iter {
+			let index = match n.checked_add(self.cursor) {
 				Some(v) => v,
 				None => break,
 			};
@@ -236,11 +265,45 @@ impl<T> MaskedArrayWriter<T> {
 		self.cursor = end;
 		n
 	}
+
+	pub fn seek(&mut self, offset: isize) {
+		self.cursor = if offset < 0 {
+			self.cursor.checked_sub((offset as usize).wrapping_neg()).unwrap()
+		} else {
+			self.cursor.checked_add(offset as usize).unwrap()
+		}
+	}
+
+	pub fn setpos(&mut self, at: usize) {
+		if at > self.inner.len() {
+			panic!("position {} out of bounds for array length {}", at, self.inner.len())
+		}
+		// setting it to len() is valid to make remaining_mut zero
+		self.cursor = at;
+	}
+}
+
+impl<T> From<MaskedArray<T>> for MaskedArrayWriter<T> {
+	fn from(other: MaskedArray<T>) -> Self {
+		Self::wrap(other, 0)
+	}
 }
 
 impl<'a, T: Copy + 'a> MaskedArrayWriter<T> {
 	pub fn write_copy<I: Iterator<Item = &'a T>>(&mut self, iter: I) -> usize {
 		self.write_from(iter.map(|x| { *x }))
+	}
+
+	pub fn copy_from_slice(&mut self, sl: &'a [T]) {
+		let end = match self.cursor.checked_add(sl.len()) {
+			Some(v) if v > self.inner.len() => panic!("copying from slice would cause out of bounds write"),
+			Some(v) => v,
+			None => panic!("end point of write overflows usize"),
+		};
+		let dest_sl: &mut [T] = &mut self.inner[self.cursor..end];
+		dest_sl.copy_from_slice(sl);
+		self.inner.unmask(self.cursor..end);
+		self.cursor = end;
 	}
 }
 
@@ -314,6 +377,44 @@ mod tests {
 		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 4);
 		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 4);
 		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 2);
+		let arr = w.into_inner();
+		assert_eq!(arr[0], 1);
+		assert_eq!(arr[1], 2);
+		assert_eq!(arr[0*4 + 2], 10);
+		assert_eq!(arr[0*4 + 3], 11);
+		assert_eq!(arr[0*4 + 4], 12);
+		assert_eq!(arr[0*4 + 5], 13);
+		assert_eq!(arr[1*4 + 2], 10);
+		assert_eq!(arr[1*4 + 3], 11);
+		assert_eq!(arr[1*4 + 4], 12);
+		assert_eq!(arr[1*4 + 5], 13);
+		assert_eq!(arr[2*4 + 2], 10);
+		assert_eq!(arr[2*4 + 3], 11);
+		assert_eq!(arr[2*4 + 4], 12);
+		assert_eq!(arr[2*4 + 5], 13);
+		assert_eq!(arr[3*4 + 2], 10);
+		assert_eq!(arr[3*4 + 3], 11);
+		assert!(arr.get_mask().all());
+	}
+
+	#[test]
+	fn test_cursor_copy_from_slice() {
+		let mut w = MaskedArrayWriter::wrap(MaskedArray::masked_with_value(16, 0u8), 0);
+		w.copy_from_slice(&[1u8, 2u8][..]);
+
+		{
+			let arr = w.get();
+			assert_eq!(arr[0], 1);
+			assert_eq!(arr[1], 2);
+			assert_eq!(arr[2], 0);
+			assert!(arr.get_mask()[..2].all());
+			assert!(!arr.get_mask()[3..].any());
+		}
+
+		w.copy_from_slice(&[10u8, 11u8, 12u8, 13u8][..]);
+		w.copy_from_slice(&[10u8, 11u8, 12u8, 13u8][..]);
+		w.copy_from_slice(&[10u8, 11u8, 12u8, 13u8][..]);
+		w.copy_from_slice(&[10u8, 11u8, 12u8, 13u8][..2]);
 		let arr = w.into_inner();
 		assert_eq!(arr[0], 1);
 		assert_eq!(arr[1], 2);
