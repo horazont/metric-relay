@@ -253,7 +253,7 @@ impl StreamBuffer for InMemoryBuffer {
 			} else {
 				// we have to flush the current block to allow a safe overwrite of self.next_block
 				drop(v);
-				let mut next_block = self.next_block.take().unwrap();
+				let next_block = self.next_block.take().unwrap();
 				// TODO: smarter interpolation
 				self.emit_blocks.push_back(next_block.into());
 
