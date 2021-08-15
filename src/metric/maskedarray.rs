@@ -176,7 +176,6 @@ impl<T> MaskedArray<T> {
 		Unmasked{
 			mask: &self.mask[r.clone()],
 			values: &self.values[r],
-			at: 0,
 		}
 	}
 
@@ -210,7 +209,6 @@ impl<T> MaskedArray<T> {
 		Filled{
 			mask: &self.mask[r.clone()],
 			values: &self.values[r],
-			at: 0,
 			fill,
 		}
 	}
@@ -368,26 +366,31 @@ impl<'a, T: Clone + 'a> MaskedArrayWriter<T> {
 pub struct Unmasked<'a, T> {
 	mask: &'a MaskSlice,
 	values: &'a [T],
-	at: usize,
 }
 
 impl<'a, T> Iterator for Unmasked<'a, T> {
 	type Item = &'a T;
 
 	fn next(&mut self) -> Option<Self::Item> {
+		let mut at = 0usize;
 		let nvalues = self.values.len();
 		debug_assert!(nvalues == self.mask.len());
-		let mut at = self.at;
 		while at < nvalues && !self.mask[at] {
 			at += 1;
 		}
 		if at >= nvalues {
-			self.at = nvalues;
+			self.mask = MaskSlice::empty();
+			self.values = &[];
 			None
 		} else {
-			self.at = at + 1;
+			// we need to exclude the selected item from the head slice, hence we add one
+			// this is okay, at < nvalues && nvalues == len and it is valid for at to be equal to len according to the split_at docs (the second slice will then simply be empty)
+			let splitpoint = at + 1;
 			debug_assert!(self.mask[at]);
-			Some(&self.values[at])
+			self.mask = self.mask.split_at(splitpoint).1;
+			let (head, tail) = std::mem::take(&mut self.values).split_at(splitpoint);
+			self.values = tail;
+			Some(&head[at])
 		}
 	}
 }
@@ -473,7 +476,6 @@ impl<'a, T> Iterator for UnmaskedChunks<'a, T> {
 		let result = Unmasked{
 			mask: &self.array.mask[r.clone()],
 			values: &self.array.values[r],
-			at: 0,
 		};
 		self.offset = next;
 		Some(result)
@@ -483,7 +485,6 @@ impl<'a, T> Iterator for UnmaskedChunks<'a, T> {
 pub struct Filled<'a, T> {
 	mask: &'a MaskSlice,
 	values: &'a [T],
-	at: usize,
 	fill: &'a T,
 }
 
@@ -491,17 +492,19 @@ impl<'a, T> Iterator for Filled<'a, T> {
 	type Item = &'a T;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let nvalues = self.values.len();
-		debug_assert!(nvalues == self.mask.len());
-		let at = self.at;
-		if at >= nvalues {
-			None
-		} else if self.mask[at] {
-			self.at += 1;
-			Some(&self.values[at])
-		} else {
-			self.at += 1;
-			Some(&self.fill)
+		debug_assert!(self.mask.len() == self.values.len());
+		match self.mask.split_first() {
+			Some((valid, mtail)) => {
+				let (value, vtail) = self.values.split_first().unwrap();
+				self.mask = mtail;
+				self.values = vtail;
+				if *valid {
+					Some(value)
+				} else {
+					Some(&self.fill)
+				}
+			},
+			None => None,
 		}
 	}
 }
@@ -560,6 +563,47 @@ mod tests {
 		assert_eq!(vec![2342u16], arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
 		arr.write_clone(2, (&[2u16, 3u16, 4u16][..]).iter());
 		assert_eq!(vec![2, 3, 4, 2342u16], arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
+	}
+
+	#[test]
+	fn test_iter_filled() {
+		let mut arr = MaskedArray::masked_with_value(4, 2342u16);
+		{
+			let mut iter = arr.iter_filled(.., &0xbeefu16);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert!(iter.next().is_none());
+			assert!(iter.next().is_none());
+		}
+		arr.unmask(1..3);
+		{
+			let mut iter = arr.iter_filled(.., &0xbeefu16);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert_eq!(*iter.next().unwrap(), 2342u16);
+			assert_eq!(*iter.next().unwrap(), 2342u16);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert!(iter.next().is_none());
+			assert!(iter.next().is_none());
+		}
+		arr.mask(2..3);
+		arr.unmask(3..4);
+		{
+			let mut iter = arr.iter_filled(.., &0xbeefu16);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert_eq!(*iter.next().unwrap(), 2342u16);
+			assert_eq!(*iter.next().unwrap(), 0xbeef);
+			assert_eq!(*iter.next().unwrap(), 2342u16);
+			assert!(iter.next().is_none());
+			assert!(iter.next().is_none());
+		}
+		arr.unmask(..);
+		{
+			let v1: Vec<_> = arr.iter_filled(.., &0xbeefu16).map(|x| {*x}).collect();
+			let v2: Vec<_> = arr.iter().map(|x|{*x}).collect();
+			assert_eq!(v1, v2);
+		}
 	}
 
 	#[test]
