@@ -97,6 +97,14 @@ fn bool_false() -> bool {
 	false
 }
 
+fn f64_one() -> f64 {
+	1.0
+}
+
+fn f64_zero() -> f64 {
+	0.0
+}
+
 #[derive(Debug, Clone)]
 pub struct PatternWrap(pub glob::Pattern);
 
@@ -383,6 +391,10 @@ pub enum Node {
 		sample_period: u16,
 		instance: String,
 		device_type: String,
+		#[serde(default = "f64_one")]
+		amplitude: f64,
+		#[serde(default = "f64_zero")]
+		offset: f64,
 		scale: f64,
 		period: f64,
 		phase: f64,
@@ -559,7 +571,7 @@ impl Node {
 					})
 				}
 			},
-			Self::Sine{nsamples, sample_period, instance, device_type, scale, period, phase, buffer} => {
+			Self::Sine{nsamples, sample_period, instance, device_type, scale, amplitude, offset, period, phase, buffer} => {
 				#[cfg(feature = "debug")]
 				{
 					Ok(traits::Node::from_source(debug::SineSource::new(
@@ -573,14 +585,18 @@ impl Node {
 							unit: metric::Unit::Arbitrary,
 							magnitude: *scale,
 						},
-						*period,
-						*phase,
+						debug::SineConfig{
+							amplitude: *amplitude,
+							offset: *offset,
+							phase: *phase,
+							period: *period,
+						},
 						buffer.build(),
 					)))
 				}
 				#[cfg(not(feature = "debug"))]
 				{
-					let _ = (nsamples, sample_period, instance, device_type, scale, period, phase, buffer);
+					let _ = (nsamples, sample_period, instance, device_type, scale, amplitude, offset, period, phase, buffer);
 					Err(BuildError::FeatureNotAvailable{
 						which: "Sine node".into(),
 						feature_name: "debug",

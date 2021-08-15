@@ -151,34 +151,39 @@ impl traits::Source for RandomSource {
 	}
 }
 
+pub struct SineConfig {
+	pub amplitude: f64,
+	pub offset: f64,
+	pub period: f64,
+	pub phase: f64,
+}
+
 pub struct SineSourceWorker<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> {
 	nsamples: u16,
 	sample_period: Duration,
 	path: metric::DevicePath,
 	scale: metric::Value,
-	period: f64,
+	cfg: SineConfig,
 	sink: BufferedStream<T>,
 	seq: u16,
 	sint: usize,
-	phase_offset: f64,
 	stop_ch: oneshot::Receiver<()>,
 }
 
 impl<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> SineSourceWorker<T> {
-	pub fn start(nsamples: u16, sample_period: Duration, path: metric::DevicePath, scale: metric::Value, period: f64, phase: f64, buffer: Box<T>, sink: broadcast::Sender<payload::Stream>, stop_ch: oneshot::Receiver<()>) {
+	pub fn start(nsamples: u16, sample_period: Duration, path: metric::DevicePath, scale: metric::Value, cfg: SineConfig, buffer: Box<T>, sink: broadcast::Sender<payload::Stream>, stop_ch: oneshot::Receiver<()>) {
 		let mut worker = SineSourceWorker{
 			nsamples,
 			sample_period,
 			path,
 			scale,
-			period,
+			cfg,
 			sink: BufferedStream::new(
 				buffer,
 				sink,
 			),
 			seq: 0,
 			sint: 0,
-			phase_offset: phase,
 			stop_ch,
 		};
 		tokio::spawn(async move {
@@ -202,9 +207,9 @@ impl<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> SineSourceWorker<
 			let mut buf = Vec::new();
 			buf.reserve(self.nsamples as usize);
 			for _i in 0..self.nsamples {
-				let t = ((self.sint as f64) / self.period + self.phase_offset) * f64::PI() * 2.0;
-				let vf = t.sin();
-				let v = (vf * i16::MAX as f64).round() as i16;
+				let t = ((self.sint as f64) / self.cfg.period + self.cfg.phase) * f64::PI() * 2.0;
+				let vf = t.sin() * self.cfg.amplitude + self.cfg.offset;
+				let v = (vf.max(-1.0).min(1.0) * i16::MAX as f64).round() as i16;
 				buf.push(v);
 				self.sint = self.sint.wrapping_add(1);
 			};
@@ -233,7 +238,7 @@ pub struct SineSource {
 }
 
 impl SineSource {
-	pub fn new<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized>(nsamples: u16, sample_period: Duration, path: metric::DevicePath, scale: metric::Value, period: f64, phase: f64, buffer: Box<T>) -> Self {
+	pub fn new<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized>(nsamples: u16, sample_period: Duration, path: metric::DevicePath, scale: metric::Value, cfg: SineConfig, buffer: Box<T>) -> Self {
 		let (guard, stop_ch) = oneshot::channel();
 		let (zygote, _) = broadcast::channel(8);
 		SineSourceWorker::start(
@@ -241,8 +246,7 @@ impl SineSource {
 			sample_period,
 			path,
 			scale,
-			period,
-			phase,
+			cfg,
 			buffer,
 			zygote.clone(),
 			stop_ch,
