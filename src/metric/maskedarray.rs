@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 use std::borrow::Borrow;
+use std::cmp::PartialEq;
 use std::ops::{Deref, DerefMut, RangeBounds, Bound, Range};
 
 use bitvec::prelude::{BitVec, Lsb0};
 
 type MaskVec = BitVec<Lsb0, usize>;
 
+#[derive(Debug, Clone)]
 pub struct MaskedArray<T> {
 	mask: MaskVec,
 	values: Vec<T>,
@@ -44,6 +46,28 @@ impl<T: Default> MaskedArray<T> {
 		}
 	}
 }
+
+impl<T: PartialEq> PartialEq<MaskedArray<T>> for MaskedArray<T> {
+	fn eq(&self, other: &Self) -> bool {
+		// the equality must only take into concern the unmasked values.
+		// if there is a difference in masking, the arrays are unequal
+		// but if the length are unequal, we can exit right away
+		if self.len() != other.len() {
+			return false
+		}
+		for ((lm, lv), (rm, rv)) in self.iter_mask().zip(self.iter()).zip(other.iter_mask().zip(other.iter())) {
+			if !*lm && !*rm {
+				continue
+			}
+			if *lm != *rm || lv != rv {
+				return false
+			}
+		}
+		true
+	}
+}
+
+impl<T: Eq> Eq for MaskedArray<T> {}
 
 // TODO: use std::slice::range after stabilization
 // stolen from https://github.com/rust-lang/rust/pull/81154/files
@@ -119,6 +143,10 @@ impl<T> MaskedArray<T> {
 		}
 		self.unmask(at..(at+n));
 	}
+
+	pub fn get_mask(&self) -> &MaskVec {
+		&self.mask
+	}
 }
 
 impl<T: Clone> MaskedArray<T> {
@@ -147,10 +175,86 @@ impl<T> DerefMut for MaskedArray<T> {
 	}
 }
 
+pub struct MaskedArrayWriter<T> {
+	inner: MaskedArray<T>,
+	cursor: usize,
+}
+
+impl<T> MaskedArrayWriter<T> {
+	pub fn wrap(inner: MaskedArray<T>, at: usize) -> Self {
+		Self{
+			inner,
+			cursor: at,
+		}
+	}
+
+	pub fn into_inner(self) -> MaskedArray<T> {
+		self.inner
+	}
+
+	pub fn remaining_mut(&self) -> usize {
+		self.inner.len().checked_sub(self.cursor).unwrap_or(0)
+	}
+
+	pub fn cursor(&self) -> usize {
+		self.cursor
+	}
+
+	pub fn len(&self) -> usize {
+		self.inner.len()
+	}
+
+	pub fn get(&self) -> &MaskedArray<T> {
+		&self.inner
+	}
+
+	pub fn write(&mut self, v: T) -> usize {
+		if self.cursor >= self.inner.len() {
+			return 0
+		}
+		self.inner[self.cursor] = v;
+		self.inner.unmask(self.cursor..self.cursor+1);
+		self.cursor += 1;
+		1
+	}
+
+	pub fn write_from<I: Iterator<Item = T>>(&mut self, iter: I) -> usize {
+		let mut n = 0;
+		for (offset, src) in iter.enumerate() {
+			let index = match offset.checked_add(self.cursor) {
+				Some(v) => v,
+				None => break,
+			};
+			if index >= self.inner.len() {
+				break
+			}
+			self.inner[index] = src;
+			n += 1;
+		}
+		let end = self.cursor.checked_add(n).unwrap();
+		self.inner.unmask(self.cursor..end);
+		self.cursor = end;
+		n
+	}
+}
+
+impl<'a, T: Copy + 'a> MaskedArrayWriter<T> {
+	pub fn write_copy<I: Iterator<Item = &'a T>>(&mut self, iter: I) -> usize {
+		self.write_from(iter.map(|x| { *x }))
+	}
+}
+
+impl<'a, T: Clone + 'a> MaskedArrayWriter<T> {
+	pub fn write_clone<I: Iterator<Item = &'a T>>(&mut self, iter: I) -> usize {
+		self.write_from(iter.map(|x| { x.clone() }))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 
+	#[test]
 	fn test_basics() {
 		let arr = MaskedArray::masked_with_value(16, 123u8);
 		assert_eq!(arr.len(), 16);
@@ -162,6 +266,7 @@ mod tests {
 		}
 	}
 
+	#[test]
 	fn test_write_from_unmasks() {
 		let mut arr = MaskedArray::masked_with_value(16, 0u8);
 		let mut src = vec![1u8, 2u8, 3u8];
@@ -176,6 +281,7 @@ mod tests {
 		assert!(arr.masked(5));
 	}
 
+	#[test]
 	fn test_write_clone_unmasks() {
 		let mut arr = MaskedArray::masked_with_value(16, 0u8);
 		let mut src = vec![1u8, 2u8, 3u8];
@@ -188,5 +294,43 @@ mod tests {
 		assert!(!arr.masked(3));
 		assert!(!arr.masked(4));
 		assert!(arr.masked(5));
+	}
+
+	#[test]
+	fn test_cursor_write() {
+		let mut w = MaskedArrayWriter::wrap(MaskedArray::masked_with_value(16, 0u8), 0);
+		assert_eq!(w.write_copy((&[1u8, 2u8][..]).iter()), 2);
+
+		{
+			let arr = w.get();
+			assert_eq!(arr[0], 1);
+			assert_eq!(arr[1], 2);
+			assert_eq!(arr[2], 0);
+			assert!(arr.get_mask()[..2].all());
+			assert!(!arr.get_mask()[3..].any());
+		}
+
+		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 4);
+		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 4);
+		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 4);
+		assert_eq!(w.write_copy((&[10u8, 11u8, 12u8, 13u8][..]).iter()), 2);
+		let arr = w.into_inner();
+		assert_eq!(arr[0], 1);
+		assert_eq!(arr[1], 2);
+		assert_eq!(arr[0*4 + 2], 10);
+		assert_eq!(arr[0*4 + 3], 11);
+		assert_eq!(arr[0*4 + 4], 12);
+		assert_eq!(arr[0*4 + 5], 13);
+		assert_eq!(arr[1*4 + 2], 10);
+		assert_eq!(arr[1*4 + 3], 11);
+		assert_eq!(arr[1*4 + 4], 12);
+		assert_eq!(arr[1*4 + 5], 13);
+		assert_eq!(arr[2*4 + 2], 10);
+		assert_eq!(arr[2*4 + 3], 11);
+		assert_eq!(arr[2*4 + 4], 12);
+		assert_eq!(arr[2*4 + 5], 13);
+		assert_eq!(arr[3*4 + 2], 10);
+		assert_eq!(arr[3*4 + 3], 11);
+		assert!(arr.get_mask().all());
 	}
 }

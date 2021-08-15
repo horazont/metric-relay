@@ -12,6 +12,7 @@ mod orderedvec;
 mod maskedarray;
 
 pub use orderedvec::OrderedVec;
+pub use maskedarray::MaskedArray;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
