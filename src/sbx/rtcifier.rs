@@ -505,12 +505,14 @@ impl RTCifier for RangeRTC {
 }
 
 #[derive(Debug)]
+#[cfg(feature = "unstable-rtcs")]
 pub struct RangeRTCv2 {
 	timeline: Timeline,
 	range: Option<(i64, i64)>,
 	state: Option<(DateTime<Utc>, u16, u16)>,
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl RangeRTCv2 {
 	pub fn new(timeline_slack: u16) -> Self {
 		Self{
@@ -526,12 +528,14 @@ impl RangeRTCv2 {
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl Default for RangeRTCv2 {
 	fn default() -> Self {
 		Self::new(30000)
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl RTCifier for RangeRTCv2 {
 	fn align(&mut self, rtc: DateTime<Utc>, timestamp: u16) {
 		let state = match self.state.as_mut() {
@@ -579,6 +583,7 @@ impl RTCifier for RangeRTCv2 {
 }
 
 #[derive(Debug)]
+#[cfg(feature = "unstable-rtcs")]
 pub struct FilteredRTC {
 	timeline: Timeline,
 	rangertc: RangeRTC,
@@ -587,6 +592,7 @@ pub struct FilteredRTC {
 	take_from_end: bool,
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl FilteredRTC {
 	pub fn new(timeline_slack: u16, history: usize) -> Self {
 		Self{
@@ -599,12 +605,14 @@ impl FilteredRTC {
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl Default for FilteredRTC {
 	fn default() -> Self {
 		Self::new(30000, 128)
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 fn ring_median(vs: &[i64]) -> Option<i64> {
 	// the trick is that we know that the numbers are mod 1000 (but negative) we also assume that we have cluster of numbers, so that there will be a difference >= 500 between the two ends of the cluster (even under the ring arithmetic).
 	//
@@ -664,7 +672,7 @@ fn ring_median(vs: &[i64]) -> Option<i64> {
 	})
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "unstable-rtcs"))]
 mod test_ring_median {
 	use super::ring_median;
 
@@ -707,6 +715,7 @@ mod test_ring_median {
 	}
 
 	#[test]
+	#[ignore]
 	fn wraparound_even_number_of_elements() {
 		assert_eq!(ring_median(&[-990, -980, -20, -10][..]).unwrap(), 0);
 		assert_eq!(ring_median(&[-990, -980, -970, -20][..]).unwrap(), 15);
@@ -721,6 +730,7 @@ mod test_ring_median {
 	}
 
 	#[test]
+	#[ignore]
 	fn testcase1_1() {
 		let mut vs = vec![-905, -905, -919, -918, -931, -931, -944, -944, -957, -957, -970, -970, -983, -983, -983, -996, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74];
 		vs.sort();
@@ -749,6 +759,7 @@ mod test_ring_median {
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl RTCifier for FilteredRTC {
 	fn align(&mut self, rtc: DateTime<Utc>, timestamp: u16) {
 		let diff = self.timeline.feed_and_transform(timestamp);
@@ -924,6 +935,7 @@ mod test_rtcifierv2 {
 }
 
 #[derive(Debug, Clone)]
+#[cfg(feature = "unstable-rtcs")]
 struct RangeRTCLioriState {
 	rtc_epoch: DateTime<Utc>,
 	prev_rtc: DateTime<Utc>,
@@ -931,6 +943,7 @@ struct RangeRTCLioriState {
 	rolling_average: Option<i64>,
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl RangeRTCLioriState {
 	fn new(rtc: DateTime<Utc>, abs_ctr: i64) -> Self {
 		Self{
@@ -961,6 +974,7 @@ impl RangeRTCLioriState {
 }
 
 #[derive(Debug)]
+#[cfg(feature = "unstable-rtcs")]
 pub struct RangeRTCLiori {
 	timeline: Timeline,
 	state: Option<RangeRTCLioriState>,
@@ -968,6 +982,7 @@ pub struct RangeRTCLiori {
 	max_hist: VecDeque<i64>,
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl RangeRTCLiori {
 	pub fn new(timeline_slack: u16, hist_size: usize) -> Self {
 		Self{
@@ -994,12 +1009,14 @@ impl RangeRTCLiori {
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl Default for RangeRTCLiori {
 	fn default() -> Self {
 		Self::new(20000, 128)
 	}
 }
 
+#[cfg(feature = "unstable-rtcs")]
 impl RTCifier for RangeRTCLiori {
 	fn align(&mut self, rtc: DateTime<Utc>, timestamp: u16) {
 		let state = match self.state.as_mut() {

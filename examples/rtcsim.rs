@@ -1,10 +1,9 @@
+#![allow(unused_imports, unused_variables, dead_code, unused_mut)]
 /*!
 This is an example which is supposed to simulate some issues around the
 recovery of an accurate RTC timestamp from the data transmitted by the
 sensor block.
 */
-use std::ops::Add;
-
 use env_logger;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rand::{Rng, SeedableRng};
@@ -84,7 +83,7 @@ impl<T: rand_distr::Distribution<f64>> Imperfection<u16> for JitterError<T> {
 		} else {
 			let offset_ms = offset_ms as i16;
 			if offset_ms < 0 {
-				v.wrapping_sub((-(offset_ms as i32) as u16))
+				v.wrapping_sub(-(offset_ms as i32) as u16)
 			} else {
 				v.wrapping_add(offset_ms as u16)
 			}
@@ -110,7 +109,7 @@ impl<T: rand_distr::Distribution<f64>> Imperfection<u16> for AccumJitterError<T>
 		} else {
 			let offset_ms = offset_ms as i16;
 			if offset_ms < 0 {
-				v.wrapping_sub((-(offset_ms as i32) as u16))
+				v.wrapping_sub(-(offset_ms as i32) as u16)
 			} else {
 				v.wrapping_add(offset_ms as u16)
 			}
@@ -207,7 +206,7 @@ impl Iterator for Driver {
 		}
 		let result = (self.state.clock, self.get_raw_rtc(), self.get_observed_rtc(), self.get_observed_ctr());
 		//eprintln!("CYCLE: raw: {} {}    observed: {} {}", self.get_raw_ctr(), self.get_raw_rtc(), result.3, result.2);
-		self.state.clock = (self.state.clock + self.sample_step);
+		self.state.clock = self.state.clock + self.sample_step;
 		Some(result)
 	}
 }

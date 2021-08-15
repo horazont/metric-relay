@@ -20,7 +20,9 @@ pub use frame::{
 	SbxStreamMessage,
 };
 
-pub use rtcifier::{LinearRTC, RangeRTC, RangeRTCv2, RangeRTCLiori, FilteredRTC, RTCifier};
+pub use rtcifier::{LinearRTC, RangeRTC, RTCifier};
+#[cfg(feature = "unstable-rtcs")]
+pub use rtcifier::{RangeRTCv2, RangeRTCLiori, FilteredRTC};
 pub use generators::ReadoutIterable;
 
 pub use stream::{

@@ -310,7 +310,7 @@ mod tests {
 			Some(v) => assert_eq!(v, 2342i16),
 			other => panic!("unexpected next result: {:?}", other),
 		}
-		for i in 0..5 {
+		for _ in 0..5 {
 			match dec.next() {
 				Some(v) => assert_eq!(v, 2343i16),
 				other => panic!("unexpected next result: {:?}", other),
@@ -348,7 +348,7 @@ mod tests {
 			Some(v) => assert_eq!(v, 2342i16),
 			other => panic!("unexpected next result: {:?}", other),
 		}
-		for i in 0..5 {
+		for _ in 0..5 {
 			match dec.next() {
 				Some(v) => assert_eq!(v, 2343i16),
 				other => panic!("unexpected next result: {:?}", other),

@@ -60,7 +60,8 @@ detrend = []
 metric-serde = ["bitvec/serde"]
 default = ["numerics", "influxdb", "pubsub", "sbx", "relay", "debug", "smbus", "http-tls", "regex", "stream-filearchive"]
 http-tls = ["reqwest/rustls-tls"]
+unstable-rtcs = []
 
 [[example]]
 name = "rtcsim"
-required-features = ["rand"]
+required-features = ["rand", "unstable-rtcs"]
