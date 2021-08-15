@@ -23,7 +23,6 @@ struct FftWorker {
 	inner: Arc<dyn FftImpl<f32>>,
 	source: mpsc::Receiver<payload::Stream>,
 	sink: broadcast::Sender<payload::Sample>,
-	overhang: Option<Vec<Complex<f32>>>,
 }
 
 impl FftWorker {
@@ -32,33 +31,26 @@ impl FftWorker {
 			inner,
 			source,
 			sink,
-			overhang: None,
 		};
 		tokio::spawn(async move {
 			worker.run().await;
 		});
 	}
 
-	fn process(overhang: Option<Vec<Complex<f32>>>, batch: payload::Stream, fft: Arc<dyn FftImpl<f32>>) -> (Vec<(i64, Vec<f32>)>, Vec<Complex<f32>>){
-		let mut overhang = match overhang {
-			Some(v) => v,
-			None => Vec::new(),
+	fn process(batch: payload::Stream, fft: Arc<dyn FftImpl<f32>>) -> Vec<(i64, Vec<f32>)> {
+		let mut samples: Vec<_> = match *batch.data {
+			metric::RawData::I16(ref v) => v.iter().map(|x| { Complex{re: *x as f32 / i16::MAX as f32, im: 0.0} }).collect(),
 		};
-
-		let samples = match *batch.data {
-			metric::RawData::I16(ref v) => v.iter().map(|x| { Complex{re: *x as f32 / i16::MAX as f32, im: 0.0} }),
-		};
-		let mut offset = -(overhang.len() as i64);
-		overhang.extend(samples);
+		let mut offset = 0;
 
 		let mut scratchspace = Vec::new();
 		scratchspace.resize(fft.get_inplace_scratch_len(), Complex::zero());
 		let mut data = Vec::with_capacity(fft.len());
 		let mut result = Vec::new();
 		let scale = fft.len() as f32 / 2.0;
-		while overhang.len() >= fft.len() {
+		while samples.len() >= fft.len() {
 			data.clear();
-			data.extend(overhang.drain(0..fft.len()));
+			data.extend(samples.drain(0..fft.len()));
 			fft.process_with_scratch(
 				&mut data,
 				&mut scratchspace,
@@ -70,8 +62,11 @@ impl FftWorker {
 			result.push((offset, pack));
 			offset += fft.len() as i64;
 		}
+		if samples.len() > 0 {
+			warn!("fft dropped {} samples; please ensure that fft size is a multiple of the inbound stream block size", samples.len());
+		}
 
-		(result, overhang)
+		result
 	}
 
 	async fn run(&mut self) {
@@ -84,11 +79,10 @@ impl FftWorker {
 				},
 			};
 
-			let (mut result, overhang) = {
+			let mut result = {
 				let fft = self.inner.clone();
-				let overhang = self.overhang.take();
 				let batch = batch.clone();
-				match spawn_blocking(move || { Self::process(overhang, batch, fft) }).await {
+				match spawn_blocking(move || { Self::process(batch, fft) }).await {
 					Ok(v) => v,
 					Err(e) => {
 						warn!("failed to FFT stream block: {}", e);
@@ -96,7 +90,6 @@ impl FftWorker {
 					},
 				}
 			};
-			self.overhang = Some(overhang);
 
 			let window_offset = (self.inner.len() / 2) as i64;
 			let mut readouts = Vec::with_capacity(result.len());
