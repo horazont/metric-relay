@@ -149,10 +149,9 @@ impl<T> MaskedArray<T> {
 	}
 
 	pub fn write_from<I: Iterator<Item = T>>(&mut self, at: usize, iter: I) {
-		let mut n = 0;
-		for (offset, (src, dest)) in iter.zip(self.values[at..].iter_mut()).enumerate() {
-			let index = offset.checked_add(at).expect("proper index");
-			n += 1;
+		let mut n = 0usize;
+		for (src, dest) in iter.zip(self.values[at..].iter_mut()) {
+			n = n.checked_add(1).unwrap();
 			*dest = src;
 		}
 		self.unmask(at..(at+n));
@@ -179,10 +178,9 @@ impl<T> From<Vec<T>> for MaskedArray<T> {
 
 impl<T: Clone> MaskedArray<T> {
 	pub fn write_clone<I: Iterator<Item = V>, V: Borrow<T>>(&mut self, at: usize, iter: I) {
-		let mut n = 0;
-		for (offset, (src, dest)) in iter.zip(self.values[at..].iter_mut()).enumerate() {
-			let index = offset.checked_add(at).expect("proper index");
-			n += 1;
+		let mut n = 0usize;
+		for (src, dest) in iter.zip(self.values[at..].iter_mut()) {
+			n = n.checked_add(1).unwrap();
 			*dest = src.borrow().clone();
 		}
 		self.unmask(at..(at+n));
