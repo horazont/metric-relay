@@ -31,7 +31,7 @@ mod buffer;
 #[cfg(feature = "stream-filearchive")]
 mod filearchive;
 
-pub use archive::{ArchiveWrite, ArchiveError};
-pub use buffer::{WriteError, StreamBuffer, InMemoryBuffer};
+pub use archive::{ArchiveError, ArchiveWrite};
+pub use buffer::{InMemoryBuffer, StreamBuffer, WriteError};
 #[cfg(feature = "stream-filearchive")]
 pub use filearchive::SimpleFileArchive;

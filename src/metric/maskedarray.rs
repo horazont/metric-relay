@@ -2,9 +2,9 @@
 use std::borrow::Borrow;
 use std::cmp::PartialEq;
 use std::iter::FromIterator;
-use std::ops::{Deref, DerefMut, RangeBounds, Bound, Range};
+use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 
-use bitvec::prelude::{BitVec, Lsb0, BitSlice};
+use bitvec::prelude::{BitSlice, BitVec, Lsb0};
 
 #[cfg(feature = "metric-serde")]
 use serde_derive::{Deserialize, Serialize};
@@ -28,10 +28,7 @@ impl<T: Clone> MaskedArray<T> {
 		debug_assert!(values.len() == values.capacity());
 		debug_assert!(values.len() == size);
 		debug_assert!(mask.len() == size);
-		Self{
-			mask,
-			values,
-		}
+		Self { mask, values }
 	}
 }
 
@@ -46,10 +43,7 @@ impl<T: Default> MaskedArray<T> {
 		debug_assert!(values.len() == values.capacity());
 		debug_assert!(values.len() == size);
 		debug_assert!(mask.len() == size);
-		Self{
-			mask,
-			values,
-		}
+		Self { mask, values }
 	}
 }
 
@@ -59,14 +53,18 @@ impl<T: PartialEq> PartialEq<MaskedArray<T>> for MaskedArray<T> {
 		// if there is a difference in masking, the arrays are unequal
 		// but if the length are unequal, we can exit right away
 		if self.len() != other.len() {
-			return false
+			return false;
 		}
-		for ((lm, lv), (rm, rv)) in self.iter_mask().zip(self.iter()).zip(other.iter_mask().zip(other.iter())) {
+		for ((lm, lv), (rm, rv)) in self
+			.iter_mask()
+			.zip(self.iter())
+			.zip(other.iter_mask().zip(other.iter()))
+		{
 			if !*lm && !*rm {
-				continue
+				continue;
 			}
 			if *lm != *rm || lv != rv {
-				return false
+				return false;
 			}
 		}
 		true
@@ -83,17 +81,13 @@ fn rangeify(l: usize, range: impl RangeBounds<usize>) -> Range<usize> {
 	let start: Bound<&usize> = range.start_bound();
 	let start = match start {
 		Bound::Included(&start) => start,
-		Bound::Excluded(start) => {
-			start.checked_add(1).unwrap()
-		}
+		Bound::Excluded(start) => start.checked_add(1).unwrap(),
 		Bound::Unbounded => 0,
 	};
 
 	let end: Bound<&usize> = range.end_bound();
 	let end = match end {
-		Bound::Included(end) => {
-			end.checked_add(1).unwrap()
-		}
+		Bound::Included(end) => end.checked_add(1).unwrap(),
 		Bound::Excluded(&end) => end,
 		Bound::Unbounded => len,
 	};
@@ -112,16 +106,13 @@ impl<T> MaskedArray<T> {
 	pub fn from_unmasked_vec(values: Vec<T>) -> Self {
 		let mut mask = BitVec::with_capacity(values.len());
 		mask.resize(values.len(), true);
-		Self{
-			mask,
-			values,
-		}
+		Self { mask, values }
 	}
 
 	pub fn with_data<O>(&self, other: Vec<O>) -> MaskedArray<O> {
 		assert!(other.len() == self.values.len());
 		debug_assert!(self.values.len() == self.mask.len());
-		MaskedArray{
+		MaskedArray {
 			mask: self.mask.clone(),
 			values: other,
 		}
@@ -164,7 +155,7 @@ impl<T> MaskedArray<T> {
 			n = n.checked_add(1).unwrap();
 			*dest = src;
 		}
-		self.unmask(at..(at+n));
+		self.unmask(at..(at + n));
 	}
 
 	pub fn get_mask(&self) -> &MaskVec {
@@ -173,7 +164,7 @@ impl<T> MaskedArray<T> {
 
 	pub fn iter_unmasked<'a>(&'a self, r: impl RangeBounds<usize>) -> Unmasked<'a, T> {
 		let r = rangeify(self.mask.len(), r);
-		Unmasked{
+		Unmasked {
 			mask: &self.mask[r.clone()],
 			values: &self.values[r],
 		}
@@ -181,14 +172,14 @@ impl<T> MaskedArray<T> {
 
 	pub fn iter_unmasked_mut<'a>(&'a mut self, r: impl RangeBounds<usize>) -> UnmaskedMut<'a, T> {
 		let r = rangeify(self.mask.len(), r);
-		UnmaskedMut{
+		UnmaskedMut {
 			mask: &self.mask[r.clone()],
 			values: &mut self.values[r],
 		}
 	}
 
 	pub fn iter_unmasked_enumerated<'a>(&'a self) -> UnmaskedEnumerated<'a, T> {
-		UnmaskedEnumerated{
+		UnmaskedEnumerated {
 			mask: &self.mask[..],
 			values: &self.values[..],
 			at: 0,
@@ -196,7 +187,7 @@ impl<T> MaskedArray<T> {
 	}
 
 	pub fn unmasked_chunks<'a>(&'a self, sz: usize) -> UnmaskedChunks<'a, T> {
-		UnmaskedChunks{
+		UnmaskedChunks {
 			array: &self,
 			chunk_size: sz,
 			offset: 0,
@@ -206,7 +197,7 @@ impl<T> MaskedArray<T> {
 	pub fn iter_filled<'a>(&'a self, r: impl RangeBounds<usize>, fill: &'a T) -> Filled<'a, T> {
 		let len = self.mask.len();
 		let r = rangeify(len, r);
-		Filled{
+		Filled {
 			mask: &self.mask[r.clone()],
 			values: &self.values[r],
 			fill,
@@ -235,7 +226,7 @@ impl<T: Clone> MaskedArray<T> {
 			n = n.checked_add(1).unwrap();
 			*dest = src.borrow().clone();
 		}
-		self.unmask(at..(at+n));
+		self.unmask(at..(at + n));
 	}
 }
 
@@ -261,10 +252,7 @@ pub struct MaskedArrayWriter<T> {
 
 impl<T> MaskedArrayWriter<T> {
 	pub fn wrap(inner: MaskedArray<T>, at: usize) -> Self {
-		Self{
-			inner,
-			cursor: at,
-		}
+		Self { inner, cursor: at }
 	}
 
 	pub fn into_inner(self) -> MaskedArray<T> {
@@ -289,10 +277,10 @@ impl<T> MaskedArrayWriter<T> {
 
 	pub fn write(&mut self, v: T) -> usize {
 		if self.cursor >= self.inner.len() {
-			return 0
+			return 0;
 		}
 		self.inner[self.cursor] = v;
-		self.inner.unmask(self.cursor..self.cursor+1);
+		self.inner.unmask(self.cursor..self.cursor + 1);
 		self.cursor += 1;
 		1
 	}
@@ -305,7 +293,7 @@ impl<T> MaskedArrayWriter<T> {
 				None => break,
 			};
 			if index >= self.inner.len() {
-				break
+				break;
 			}
 			self.inner[index] = src;
 			n += 1;
@@ -318,7 +306,9 @@ impl<T> MaskedArrayWriter<T> {
 
 	pub fn seek(&mut self, offset: isize) {
 		self.cursor = if offset < 0 {
-			self.cursor.checked_sub((offset as usize).wrapping_neg()).unwrap()
+			self.cursor
+				.checked_sub((offset as usize).wrapping_neg())
+				.unwrap()
 		} else {
 			self.cursor.checked_add(offset as usize).unwrap()
 		}
@@ -326,7 +316,11 @@ impl<T> MaskedArrayWriter<T> {
 
 	pub fn setpos(&mut self, at: usize) {
 		if at > self.inner.len() {
-			panic!("position {} out of bounds for array length {}", at, self.inner.len())
+			panic!(
+				"position {} out of bounds for array length {}",
+				at,
+				self.inner.len()
+			)
 		}
 		// setting it to len() is valid to make remaining_mut zero
 		self.cursor = at;
@@ -341,12 +335,14 @@ impl<T> From<MaskedArray<T>> for MaskedArrayWriter<T> {
 
 impl<'a, T: Copy + 'a> MaskedArrayWriter<T> {
 	pub fn write_copy<I: Iterator<Item = &'a T>>(&mut self, iter: I) -> usize {
-		self.write_from(iter.map(|x| { *x }))
+		self.write_from(iter.map(|x| *x))
 	}
 
 	pub fn copy_from_slice(&mut self, sl: &'a [T]) {
 		let end = match self.cursor.checked_add(sl.len()) {
-			Some(v) if v > self.inner.len() => panic!("copying from slice would cause out of bounds write"),
+			Some(v) if v > self.inner.len() => {
+				panic!("copying from slice would cause out of bounds write")
+			}
 			Some(v) => v,
 			None => panic!("end point of write overflows usize"),
 		};
@@ -359,7 +355,7 @@ impl<'a, T: Copy + 'a> MaskedArrayWriter<T> {
 
 impl<'a, T: Clone + 'a> MaskedArrayWriter<T> {
 	pub fn write_clone<I: Iterator<Item = &'a T>>(&mut self, iter: I) -> usize {
-		self.write_from(iter.map(|x| { x.clone() }))
+		self.write_from(iter.map(|x| x.clone()))
 	}
 }
 
@@ -465,7 +461,7 @@ impl<'a, T> Iterator for UnmaskedChunks<'a, T> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.offset >= self.array.len() {
-			return None
+			return None;
 		}
 
 		let rbegin = self.offset;
@@ -473,7 +469,7 @@ impl<'a, T> Iterator for UnmaskedChunks<'a, T> {
 		let rend = next.min(self.array.len());
 		let r = rbegin..rend;
 
-		let result = Unmasked{
+		let result = Unmasked {
 			mask: &self.array.mask[r.clone()],
 			values: &self.array.values[r],
 		};
@@ -503,7 +499,7 @@ impl<'a, T> Iterator for Filled<'a, T> {
 				} else {
 					Some(&self.fill)
 				}
-			},
+			}
 			None => None,
 		}
 	}
@@ -558,11 +554,20 @@ mod tests {
 	#[test]
 	fn test_iter_unmasked() {
 		let mut arr = MaskedArray::masked_with_value(16, 2342u16);
-		assert_eq!(Vec::<u16>::new(), arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
+		assert_eq!(
+			Vec::<u16>::new(),
+			arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>()
+		);
 		arr.unmask(10..11);
-		assert_eq!(vec![2342u16], arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
+		assert_eq!(
+			vec![2342u16],
+			arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>()
+		);
 		arr.write_clone(2, (&[2u16, 3u16, 4u16][..]).iter());
-		assert_eq!(vec![2, 3, 4, 2342u16], arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>());
+		assert_eq!(
+			vec![2, 3, 4, 2342u16],
+			arr.iter_unmasked(..).map(|x| { *x }).collect::<Vec<_>>()
+		);
 	}
 
 	#[test]
@@ -600,8 +605,8 @@ mod tests {
 		}
 		arr.unmask(..);
 		{
-			let v1: Vec<_> = arr.iter_filled(.., &0xbeefu16).map(|x| {*x}).collect();
-			let v2: Vec<_> = arr.iter().map(|x|{*x}).collect();
+			let v1: Vec<_> = arr.iter_filled(.., &0xbeefu16).map(|x| *x).collect();
+			let v2: Vec<_> = arr.iter().map(|x| *x).collect();
 			assert_eq!(v1, v2);
 		}
 	}
@@ -635,7 +640,7 @@ mod tests {
 		let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15u8];
 		let arr: MaskedArray<_> = data.clone().into();
 		for (chiter, chunk) in arr.unmasked_chunks(4).zip(data.chunks(4)) {
-			let from_marr: Vec<_> = chiter.map(|x| {*x}).collect();
+			let from_marr: Vec<_> = chiter.map(|x| *x).collect();
 			assert_eq!(&from_marr[..], &chunk[..]);
 		}
 	}
@@ -646,7 +651,10 @@ mod tests {
 		let mut arr: MaskedArray<_> = data.clone().into();
 		arr.mask(1..3);
 		arr.mask(8..12);
-		let chunks: Vec<Vec<u8>> = arr.unmasked_chunks(4).map(|x| { x.map(|y| {*y}).collect::<Vec<_>>() }).collect();
+		let chunks: Vec<Vec<u8>> = arr
+			.unmasked_chunks(4)
+			.map(|x| x.map(|y| *y).collect::<Vec<_>>())
+			.collect();
 		assert_eq!(chunks[0], vec![1, 4u8]);
 		assert_eq!(chunks[1], vec![5, 6, 7, 8u8]);
 		assert_eq!(chunks[2], Vec::<u8>::new());
@@ -674,20 +682,20 @@ mod tests {
 		let arr = w.into_inner();
 		assert_eq!(arr[0], 1);
 		assert_eq!(arr[1], 2);
-		assert_eq!(arr[0*4 + 2], 10);
-		assert_eq!(arr[0*4 + 3], 11);
-		assert_eq!(arr[0*4 + 4], 12);
-		assert_eq!(arr[0*4 + 5], 13);
-		assert_eq!(arr[1*4 + 2], 10);
-		assert_eq!(arr[1*4 + 3], 11);
-		assert_eq!(arr[1*4 + 4], 12);
-		assert_eq!(arr[1*4 + 5], 13);
-		assert_eq!(arr[2*4 + 2], 10);
-		assert_eq!(arr[2*4 + 3], 11);
-		assert_eq!(arr[2*4 + 4], 12);
-		assert_eq!(arr[2*4 + 5], 13);
-		assert_eq!(arr[3*4 + 2], 10);
-		assert_eq!(arr[3*4 + 3], 11);
+		assert_eq!(arr[0 * 4 + 2], 10);
+		assert_eq!(arr[0 * 4 + 3], 11);
+		assert_eq!(arr[0 * 4 + 4], 12);
+		assert_eq!(arr[0 * 4 + 5], 13);
+		assert_eq!(arr[1 * 4 + 2], 10);
+		assert_eq!(arr[1 * 4 + 3], 11);
+		assert_eq!(arr[1 * 4 + 4], 12);
+		assert_eq!(arr[1 * 4 + 5], 13);
+		assert_eq!(arr[2 * 4 + 2], 10);
+		assert_eq!(arr[2 * 4 + 3], 11);
+		assert_eq!(arr[2 * 4 + 4], 12);
+		assert_eq!(arr[2 * 4 + 5], 13);
+		assert_eq!(arr[3 * 4 + 2], 10);
+		assert_eq!(arr[3 * 4 + 3], 11);
 		assert!(arr.get_mask().all());
 	}
 
@@ -712,20 +720,20 @@ mod tests {
 		let arr = w.into_inner();
 		assert_eq!(arr[0], 1);
 		assert_eq!(arr[1], 2);
-		assert_eq!(arr[0*4 + 2], 10);
-		assert_eq!(arr[0*4 + 3], 11);
-		assert_eq!(arr[0*4 + 4], 12);
-		assert_eq!(arr[0*4 + 5], 13);
-		assert_eq!(arr[1*4 + 2], 10);
-		assert_eq!(arr[1*4 + 3], 11);
-		assert_eq!(arr[1*4 + 4], 12);
-		assert_eq!(arr[1*4 + 5], 13);
-		assert_eq!(arr[2*4 + 2], 10);
-		assert_eq!(arr[2*4 + 3], 11);
-		assert_eq!(arr[2*4 + 4], 12);
-		assert_eq!(arr[2*4 + 5], 13);
-		assert_eq!(arr[3*4 + 2], 10);
-		assert_eq!(arr[3*4 + 3], 11);
+		assert_eq!(arr[0 * 4 + 2], 10);
+		assert_eq!(arr[0 * 4 + 3], 11);
+		assert_eq!(arr[0 * 4 + 4], 12);
+		assert_eq!(arr[0 * 4 + 5], 13);
+		assert_eq!(arr[1 * 4 + 2], 10);
+		assert_eq!(arr[1 * 4 + 3], 11);
+		assert_eq!(arr[1 * 4 + 4], 12);
+		assert_eq!(arr[1 * 4 + 5], 13);
+		assert_eq!(arr[2 * 4 + 2], 10);
+		assert_eq!(arr[2 * 4 + 3], 11);
+		assert_eq!(arr[2 * 4 + 4], 12);
+		assert_eq!(arr[2 * 4 + 5], 13);
+		assert_eq!(arr[3 * 4 + 2], 10);
+		assert_eq!(arr[3 * 4 + 3], 11);
 		assert!(arr.get_mask().all());
 	}
 }

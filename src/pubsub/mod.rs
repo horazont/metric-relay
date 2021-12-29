@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
-use microtemplate::{Substitutions, render};
-use xml::escape::{escape_str_attribute};
+use microtemplate::{render, Substitutions};
+use xml::escape::escape_str_attribute;
 
 use crate::metric;
 
@@ -20,7 +20,7 @@ pub struct Client {
 
 impl Client {
 	pub fn new(api_url: String, node_template: String, override_host: Option<String>) -> Self {
-		Self{
+		Self {
 			client: reqwest::Client::new(),
 			api_url,
 			node_template,
@@ -28,11 +28,7 @@ impl Client {
 		}
 	}
 
-	pub async fn post(
-			&self,
-			readout: &metric::Readout,
-			) -> Result<(), reqwest::Error>
-	{
+	pub async fn post(&self, readout: &metric::Readout) -> Result<(), reqwest::Error> {
 		let mut payload = format!(
 			"<sample-batch xmlns='https://xmlns.zombofant.net/hint/sensor/1.0'  timestamp='{}' part='{}' instance='{}'>",
 			readout.timestamp.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
@@ -41,14 +37,23 @@ impl Client {
 		);
 
 		for (k, v) in readout.components.iter() {
-			write!(payload, "<numeric subpart='{}' value='{:?}'/>", escape_str_attribute(k), v.magnitude).unwrap();
+			write!(
+				payload,
+				"<numeric subpart='{}' value='{:?}'/>",
+				escape_str_attribute(k),
+				v.magnitude
+			)
+			.unwrap();
 		}
 		payload.write_str("</sample-batch>").unwrap();
 
-		let node = render(&self.node_template, TemplateArgs{
-			instance: &readout.path.instance,
-			device_type: &readout.path.device_type,
-		});
+		let node = render(
+			&self.node_template,
+			TemplateArgs {
+				instance: &readout.path.instance,
+				device_type: &readout.path.device_type,
+			},
+		);
 
 		let req = self.client.post(format!("{}/{}", self.api_url, node));
 		let req = req.header("Content-Type", "application/xml");

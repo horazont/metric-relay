@@ -5,14 +5,13 @@ recovery of an accurate RTC timestamp from the data transmitted by the
 sensor block.
 */
 use env_logger;
-use rand_xoshiro::Xoshiro256PlusPlus;
 use rand::{Rng, SeedableRng};
 use rand_distr::Distribution;
+use rand_xoshiro::Xoshiro256PlusPlus;
 
-use chrono::{DateTime, Utc, Timelike, Duration, TimeZone};
+use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 
-use metric_relay::sbx::{RTCifier, LinearRTC, RangeRTC, RangeRTCv2, RangeRTCLiori, FilteredRTC};
-
+use metric_relay::sbx::{FilteredRTC, LinearRTC, RTCifier, RangeRTC, RangeRTCLiori, RangeRTCv2};
 
 type SimRng = Xoshiro256PlusPlus;
 
@@ -31,11 +30,9 @@ impl State {
 	}
 }
 
-
 trait Imperfection<T> {
 	fn mess_with(&mut self, state: &mut State, v: T) -> T;
 }
-
 
 struct DriftError {
 	pub rate: f64,
@@ -68,7 +65,6 @@ impl Imperfection<u16> for DriftError {
 	}
 }
 
-
 struct JitterError<T: rand_distr::Distribution<f64>> {
 	distr: T,
 }
@@ -90,7 +86,6 @@ impl<T: rand_distr::Distribution<f64>> Imperfection<u16> for JitterError<T> {
 		}
 	}
 }
-
 
 struct AccumJitterError<T: rand_distr::Distribution<f64>> {
 	distr: T,
@@ -117,7 +112,6 @@ impl<T: rand_distr::Distribution<f64>> Imperfection<u16> for AccumJitterError<T>
 	}
 }
 
-
 struct OffsetError<T: Copy> {
 	pub offset: T,
 }
@@ -133,7 +127,6 @@ impl Imperfection<DateTime<Utc>> for OffsetError<Duration> {
 		v + self.offset
 	}
 }
-
 
 struct Driver {
 	ctr_effects: Vec<Box<dyn Imperfection<u16> + 'static>>,
@@ -154,19 +147,18 @@ fn apply<T>(effects: &mut [Box<dyn Imperfection<T> + 'static>], state: &mut Stat
 
 impl Driver {
 	pub fn new(
-			ctr_effects: Vec<Box<dyn Imperfection<u16> + 'static>>,
-			rtc_effects: Vec<Box<dyn Imperfection<DateTime<Utc>> + 'static>>,
-			rng: SimRng,
-			sample_step: Duration,
-			nsteps: u16,
-			) -> Self
-	{
+		ctr_effects: Vec<Box<dyn Imperfection<u16> + 'static>>,
+		rtc_effects: Vec<Box<dyn Imperfection<DateTime<Utc>> + 'static>>,
+		rng: SimRng,
+		sample_step: Duration,
+		nsteps: u16,
+	) -> Self {
 		let end = sample_step * (nsteps as i32);
-		Self{
+		Self {
 			ctr_effects,
 			rtc_effects,
 			sample_step,
-			state: State{
+			state: State {
 				clock: Duration::zero(),
 				rng,
 			},
@@ -202,15 +194,19 @@ impl Iterator for Driver {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.state.clock >= self.end {
-			return None
+			return None;
 		}
-		let result = (self.state.clock, self.get_raw_rtc(), self.get_observed_rtc(), self.get_observed_ctr());
+		let result = (
+			self.state.clock,
+			self.get_raw_rtc(),
+			self.get_observed_rtc(),
+			self.get_observed_ctr(),
+		);
 		//eprintln!("CYCLE: raw: {} {}    observed: {} {}", self.get_raw_ctr(), self.get_raw_rtc(), result.3, result.2);
 		self.state.clock = self.state.clock + self.sample_step;
 		Some(result)
 	}
 }
-
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	env_logger::init();
@@ -218,8 +214,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut driver = Driver::new(
 		vec![
 			// worst case drift caused by the clock jitter
-			Box::new(OffsetError{offset: 2342}),
-			Box::new(DriftError{rate: 2.16e-05, offset: 0}),
+			Box::new(OffsetError { offset: 2342 }),
+			Box::new(DriftError {
+				rate: 2.16e-05,
+				offset: 0,
+			}),
 			// random timer jitter
 			// so the millisecond clock of the cpu is driven by its main clock, which is driven by a PLL which is sourced from an 8 MHz oscillator
 			// the PLL names a jitter of up to 300ps. it is running at 72 MHz.
@@ -229,9 +228,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			// delay in the processing queue; this is negative because it makes the timestamp appear earlier than it was in truth
 			//Box::new(JitterError{distr: rand_distr::Normal::new(-0.2f64, 0.8f64).unwrap()}),
 		],
-		vec![
-			Box::new(OffsetError{offset: Duration::milliseconds(500)}),
-		],
+		vec![Box::new(OffsetError {
+			offset: Duration::milliseconds(500),
+		})],
 		Xoshiro256PlusPlus::seed_from_u64(8752437625u64),
 		Duration::milliseconds(487),
 		4096,

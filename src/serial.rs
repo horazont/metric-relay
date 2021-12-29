@@ -33,7 +33,7 @@ impl From<Usn> for SerialNumber {
 impl PartialOrd for SerialNumber {
 	fn partial_cmp(&self, other: &SerialNumber) -> Option<Ordering> {
 		if self.0 == other.0 {
-			return Some(Ordering::Equal)
+			return Some(Ordering::Equal);
 		}
 		let diff = other.0.wrapping_sub(self.0);
 		match diff.partial_cmp(&THRESHOLD) {
@@ -75,21 +75,22 @@ impl Sub<SerialNumber> for SerialNumber {
 	type Output = Isn;
 
 	fn sub(self, rhs: SerialNumber) -> Self::Output {
-		self.checked_sub(rhs).expect("attempt to subtract two serial numbers which have an undefined difference")
+		self.checked_sub(rhs)
+			.expect("attempt to subtract two serial numbers which have an undefined difference")
 	}
 }
 
 impl SerialNumber {
 	pub fn checked_add_u16(self, rhs: Usn) -> Option<SerialNumber> {
 		if rhs >= THRESHOLD {
-			return None
+			return None;
 		}
 		Some(self + rhs)
 	}
 
 	pub fn checked_sub_u16(self, rhs: Usn) -> Option<SerialNumber> {
 		if rhs >= THRESHOLD {
-			return None
+			return None;
 		}
 		Some(self - rhs)
 	}
@@ -97,12 +98,8 @@ impl SerialNumber {
 	pub fn checked_sub(self, rhs: SerialNumber) -> Option<i16> {
 		match self.partial_cmp(&rhs) {
 			Some(Ordering::Equal) => Some(0),
-			Some(Ordering::Greater) => {
-				Some(wrapping_sub_to_signed(self.0, rhs.0))
-			},
-			Some(Ordering::Less) => {
-				Some(-wrapping_sub_to_signed(rhs.0, self.0))
-			},
+			Some(Ordering::Greater) => Some(wrapping_sub_to_signed(self.0, rhs.0)),
+			Some(Ordering::Less) => Some(-wrapping_sub_to_signed(rhs.0, self.0)),
 			None => None,
 		}
 	}

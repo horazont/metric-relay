@@ -2,9 +2,9 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Arc;
 
-use smartstring::alias::{String as SmartString};
+use smartstring::alias::String as SmartString;
 
-use log::{debug, warn, trace};
+use log::{debug, trace, warn};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -12,14 +12,14 @@ use tokio::task::spawn_blocking;
 
 use num_traits::Zero;
 
-use rustfft::{FftPlanner, num_complex::Complex, Fft as FftImpl};
+use rustfft::{num_complex::Complex, Fft as FftImpl, FftPlanner};
 
 use crate::metric;
 use crate::metric::MaskedArray;
 
-use super::payload;
 use super::adapter::Serializer;
-use super::traits::{Source, Sink, null_receiver};
+use super::payload;
+use super::traits::{null_receiver, Sink, Source};
 
 struct FftWorker {
 	inner: Arc<dyn FftImpl<f32>>,
@@ -42,8 +42,12 @@ fn masked_re_avg(r: Range<usize>, ma: &MaskedArray<Complex<f32>>) -> Option<f32>
 }
 
 impl FftWorker {
-	pub fn spawn(inner: Arc<dyn FftImpl<f32>>, source: mpsc::Receiver<payload::Stream>, sink: broadcast::Sender<payload::Sample>) {
-		let mut worker = FftWorker{
+	pub fn spawn(
+		inner: Arc<dyn FftImpl<f32>>,
+		source: mpsc::Receiver<payload::Stream>,
+		sink: broadcast::Sender<payload::Sample>,
+	) {
+		let mut worker = FftWorker {
 			inner,
 			source,
 			sink,
@@ -55,7 +59,14 @@ impl FftWorker {
 
 	fn process(batch: payload::Stream, fft: Arc<dyn FftImpl<f32>>) -> Vec<(usize, Vec<f32>)> {
 		let samples: MaskedArray<Complex<f32>> = match *batch.data {
-			metric::RawData::I16(ref v) => v.with_data(v.iter().map(|x| { Complex{re: *x as f32 / i16::MAX as f32, im: 0.0} }).collect()),
+			metric::RawData::I16(ref v) => v.with_data(
+				v.iter()
+					.map(|x| Complex {
+						re: *x as f32 / i16::MAX as f32,
+						im: 0.0,
+					})
+					.collect(),
+			),
 		};
 		let mut offset = 0usize;
 
@@ -67,7 +78,7 @@ impl FftWorker {
 		while offset < samples.len() {
 			let r = offset..(offset + fft.len());
 			if r.end > samples.len() {
-				break
+				break;
 			}
 			data.clear();
 
@@ -77,31 +88,49 @@ impl FftWorker {
 					Some(v) => v,
 					// *no* value is valid in this chunk, skip it altogether
 					None => {
-						trace!("dropping {} masked samples at {}/{}", fft.len(), offset, samples.len());
+						trace!(
+							"dropping {} masked samples at {}/{}",
+							fft.len(),
+							offset,
+							samples.len()
+						);
 						offset += fft.len();
-						continue
-					},
+						continue;
+					}
 				};
-				trace!("filled masked values of {} samples with avg {} at {}/{}", fft.len(), avg, offset, samples.len());
-				data.extend(samples.iter_filled(r.clone(), &Complex{re: avg, im: 0.}));
+				trace!(
+					"filled masked values of {} samples with avg {} at {}/{}",
+					fft.len(),
+					avg,
+					offset,
+					samples.len()
+				);
+				data.extend(samples.iter_filled(r.clone(), &Complex { re: avg, im: 0. }));
 			} else {
-				trace!("using {} samples as-is at {}/{}", fft.len(), offset, samples.len());
+				trace!(
+					"using {} samples as-is at {}/{}",
+					fft.len(),
+					offset,
+					samples.len()
+				);
 				data.extend(samples[r].iter());
 			}
 
-			fft.process_with_scratch(
-				&mut data,
-				&mut scratchspace,
-			);
+			fft.process_with_scratch(&mut data, &mut scratchspace);
 			let npack = data.len() / 2;
-			let mut pack: Vec<_> = data.drain(..=npack).map(|x| { x.norm() / scale}).collect();
+			let mut pack: Vec<_> = data.drain(..=npack).map(|x| x.norm() / scale).collect();
 			pack[0] /= 2.0;
 			pack[npack] /= 2.0;
 			result.push((offset, pack));
 			offset += fft.len();
 		}
 
-		if let Some(dropped) = samples.len().checked_sub(offset).and_then(|x| { if x > 0 { Some(x) } else { None }}) {
+		if let Some(dropped) =
+			samples
+				.len()
+				.checked_sub(offset)
+				.and_then(|x| if x > 0 { Some(x) } else { None })
+		{
 			warn!("fft dropped {} samples; please ensure that fft size is a multiple of the inbound stream block size", dropped);
 		}
 
@@ -115,19 +144,23 @@ impl FftWorker {
 				None => {
 					debug!("shutting down fft worker, source is gone");
 					return;
-				},
+				}
 			};
 
 			let mut result = {
 				let fft = self.inner.clone();
 				let batch = batch.clone();
-				trace!("spawning processor for batch with {} samples / fft size {}", batch.data.len(), fft.len());
-				match spawn_blocking(move || { Self::process(batch, fft) }).await {
+				trace!(
+					"spawning processor for batch with {} samples / fft size {}",
+					batch.data.len(),
+					fft.len()
+				);
+				match spawn_blocking(move || Self::process(batch, fft)).await {
 					Ok(v) => v,
 					Err(e) => {
 						warn!("failed to FFT stream block: {}", e);
 						continue;
-					},
+					}
 				}
 			};
 
@@ -144,21 +177,26 @@ impl FftWorker {
 					let freq = (i as f32) * freq_scale;
 					let mut buf = SmartString::new();
 					write!(&mut buf, "{}", freq).unwrap();
-					components.insert(buf, metric::Value{magnitude: magnitude as f64, unit: batch.scale.unit.clone()});
-				};
+					components.insert(
+						buf,
+						metric::Value {
+							magnitude: magnitude as f64,
+							unit: batch.scale.unit.clone(),
+						},
+					);
+				}
 
-				readouts.push(Arc::new(metric::Readout{
+				readouts.push(Arc::new(metric::Readout {
 					timestamp: tc,
 					path: batch.path.clone(),
 					components,
 				}));
-
 			}
 			match self.sink.send(readouts) {
 				Ok(_) => (),
 				Err(_) => {
 					warn!("lost fft processed sample, no receivers");
-				},
+				}
 			}
 		}
 	}
@@ -174,15 +212,8 @@ impl Fft {
 		let (zygote, _) = broadcast::channel(128);
 		let (serializer, source) = Serializer::new(8);
 		let fft = FftPlanner::new().plan_fft_forward(size);
-		FftWorker::spawn(
-			fft,
-			source,
-			zygote.clone(),
-		);
-		Self{
-			serializer,
-			zygote,
-		}
+		FftWorker::spawn(fft, source, zygote.clone());
+		Self { serializer, zygote }
 	}
 }
 

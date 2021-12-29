@@ -1,18 +1,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{error};
+use log::error;
 
 use tokio::select;
 use tokio::sync::broadcast;
-use tokio::sync::oneshot;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use crate::relay;
 
-use super::traits;
-use super::payload;
 use super::adapter::Serializer;
+use super::payload;
+use super::traits;
 
 struct RelaySourceWorker {
 	sample_sink: broadcast::Sender<payload::Sample>,
@@ -57,7 +57,7 @@ pub struct RelaySource {
 
 impl RelaySource {
 	pub fn new(socket: tokio::net::TcpListener) -> Self {
-		let cfg = Arc::new(relay::SessionConfig{
+		let cfg = Arc::new(relay::SessionConfig {
 			soft_timeout: Duration::new(5, 0),
 			hard_timeout: Duration::new(30, 0),
 			session_timeout: Duration::new(1800, 0),
@@ -65,16 +65,14 @@ impl RelaySource {
 		let (guard, stop_ch) = oneshot::channel();
 		let (sample_zygote, _) = broadcast::channel(8);
 		let (stream_zygote, _) = broadcast::channel(8);
-		let mut state = RelaySourceWorker{
+		let mut state = RelaySourceWorker {
 			stream_sink: stream_zygote.clone(),
 			sample_sink: sample_zygote.clone(),
 			stop_ch,
 			socket: relay::RecvSocket::new(socket, cfg),
 		};
-		tokio::spawn(async move {
-			state.run().await
-		});
-		Self{
+		tokio::spawn(async move { state.run().await });
+		Self {
 			stream_zygote,
 			sample_zygote,
 			guard,
@@ -126,18 +124,13 @@ impl RelaySink {
 	pub fn new<T: tokio::net::ToSocketAddrs + Sync + Send + 'static>(addrs: T) -> Self {
 		let (samples, sample_source) = Serializer::new(8);
 		let (stream, stream_source) = Serializer::new(8);
-		let mut worker = RelaySinkWorker{
+		let mut worker = RelaySinkWorker {
 			sample_source,
 			stream_source,
 			sock: relay::SendSocket::new(addrs),
 		};
-		tokio::spawn(async move {
-			worker.run().await
-		});
-		Self{
-			samples,
-			stream,
-		}
+		tokio::spawn(async move { worker.run().await });
+		Self { samples, stream }
 	}
 }
 

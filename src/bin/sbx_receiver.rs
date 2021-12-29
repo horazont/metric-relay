@@ -1,14 +1,14 @@
-use tokio;
 use std::net;
+use tokio;
 use tokio::net::UdpSocket;
 
-use bytes::{Buf};
+use bytes::Buf;
 
-use chrono::{Utc, TimeZone};
+use chrono::{TimeZone, Utc};
 
-use metric_relay::snurl;
 use metric_relay::sbx;
-use metric_relay::sbx::{ReadoutIterable, RTCifier};
+use metric_relay::sbx::{RTCifier, ReadoutIterable};
+use metric_relay::snurl;
 
 use structopt::StructOpt;
 
@@ -21,14 +21,18 @@ struct Opt {
 	dst_port: u16,
 }
 
-fn dump<R: Buf>(rtcifier: &mut sbx::LinearRTC, aligned: &mut bool, b: &mut R) -> std::io::Result<()> {
+fn dump<R: Buf>(
+	rtcifier: &mut sbx::LinearRTC,
+	aligned: &mut bool,
+	b: &mut R,
+) -> std::io::Result<()> {
 	let hdr = sbx::EspMessageHeader::read(b)?;
 	println!("{:x?}", hdr);
 	match hdr.type_ {
 		sbx::EspMessageType::Status => {
 			let _status = sbx::EspStatus::read(b)?;
 			// println!("  {:?}", status);
-		},
+		}
 		sbx::EspMessageType::DataPassthrough => {
 			let msg = sbx::Message::read(b)?;
 			if let sbx::Message::Status(ref status) = msg {
@@ -47,14 +51,17 @@ fn dump<R: Buf>(rtcifier: &mut sbx::LinearRTC, aligned: &mut bool, b: &mut R) ->
 			if *aligned {
 				for readout in msg.readouts(rtcifier) {
 					println!("  {}", readout.timestamp);
-					println!("    {} @ {}", readout.path.device_type, readout.path.instance);
+					println!(
+						"    {} @ {}",
+						readout.path.device_type, readout.path.instance
+					);
 					for (comp, value) in readout.components.iter() {
 						println!("      {} = {} {}", comp, value.magnitude, value.unit);
 					}
 				}
 			}
 			// println!("  {:?}", msg);
-		},
+		}
 	}
 	Ok(())
 }
@@ -63,8 +70,18 @@ fn dump<R: Buf>(rtcifier: &mut sbx::LinearRTC, aligned: &mut bool, b: &mut R) ->
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let opt = Opt::from_args();
 
-	let raw_sock = UdpSocket::bind(net::SocketAddr::new("0.0.0.0".parse::<net::IpAddr>().unwrap(), opt.src_port)).await?;
-	let sock = snurl::Socket::new(raw_sock, net::SocketAddr::new("255.255.255.255".parse::<net::IpAddr>().unwrap(), opt.dst_port));
+	let raw_sock = UdpSocket::bind(net::SocketAddr::new(
+		"0.0.0.0".parse::<net::IpAddr>().unwrap(),
+		opt.src_port,
+	))
+	.await?;
+	let sock = snurl::Socket::new(
+		raw_sock,
+		net::SocketAddr::new(
+			"255.255.255.255".parse::<net::IpAddr>().unwrap(),
+			opt.dst_port,
+		),
+	);
 	let mut ep = snurl::Endpoint::new(sock);
 
 	let mut rtcifier = sbx::LinearRTC::default();
@@ -81,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 				Ok(()) => (),
 			}
 		} else {
-			break
+			break;
 		}
 	}
 

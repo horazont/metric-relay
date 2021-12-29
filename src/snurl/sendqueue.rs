@@ -3,8 +3,8 @@ use std::ops::Deref;
 
 use bytes::{Bytes, BytesMut};
 
-use crate::serial::SerialNumber;
 use super::frame::{DataFrame, RawDataFrameHeader};
+use crate::serial::SerialNumber;
 
 #[derive(Debug, Clone)]
 pub struct SendQueue {
@@ -19,7 +19,7 @@ impl SendQueue {
 		assert!(max_size > 0);
 		let mut q = Vec::new();
 		q.reserve(max_size);
-		SendQueue{
+		SendQueue {
 			max_size,
 			q,
 			next_sn: first_sn,
@@ -65,10 +65,12 @@ impl SendQueue {
 		let mut buf = BytesMut::new();
 		let sn = self.next_sn;
 		buf.reserve(payload.len() + RawDataFrameHeader::RAW_LEN);
-		DataFrame{
+		DataFrame {
 			sn: self.next_sn,
 			payload: payload,
-		}.write(&mut buf).unwrap();
+		}
+		.write(&mut buf)
+		.unwrap();
 
 		self.push_into_queue(sn, buf.freeze());
 		self.next_sn = self.next_sn + 1;
@@ -81,9 +83,10 @@ impl SendQueue {
 
 	// Discard a frame from the send queue, if it exists.
 	pub fn discard(&mut self, sn: SerialNumber) {
-		match self.q.binary_search_by(|e| {
-			e.0.partial_cmp(&sn).unwrap_or(Ordering::Equal)
-		}) {
+		match self
+			.q
+			.binary_search_by(|e| e.0.partial_cmp(&sn).unwrap_or(Ordering::Equal))
+		{
 			// element exists, delete it
 			Ok(index) => {
 				self.q.remove(index);
@@ -96,7 +99,7 @@ impl SendQueue {
 						self.next_sn
 					}
 				}
-			},
+			}
 			// element does not exist, that’s ok
 			Err(_) => (),
 		};
@@ -104,9 +107,7 @@ impl SendQueue {
 
 	// Discard all frames up to and including a given serial number
 	pub fn discard_up_to_incl(&mut self, sn: SerialNumber) {
-		self.q.retain(|e| {
-			e.0 > sn
-		});
+		self.q.retain(|e| e.0 > sn);
 		self.min_sn = if self.q.len() > 0 {
 			self.q[0].0
 		} else {

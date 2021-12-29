@@ -2,15 +2,14 @@ use std::sync::Arc;
 
 use log::warn;
 
-use smartstring::alias::{String as SmartString};
+use smartstring::alias::String as SmartString;
 
-use glob::{Pattern, MatchOptions};
+use glob::{MatchOptions, Pattern};
 
 #[cfg(feature = "regex")]
 use regex::Regex;
 
 use super::readout::{Readout, Sample};
-
 
 pub trait Filter: Send + Sync {
 	fn process(&self, readout: Arc<Readout>) -> Option<Arc<Readout>>;
@@ -23,16 +22,18 @@ pub struct Select {
 
 impl Select {
 	pub fn matches(&self, readout: &Readout) -> bool {
-		static MATCH_OPTIONS: MatchOptions = MatchOptions{
+		static MATCH_OPTIONS: MatchOptions = MatchOptions {
 			case_sensitive: false,
 			require_literal_separator: true,
 			require_literal_leading_dot: false,
 		};
 
 		match self.match_measurement.as_ref() {
-			Some(p) => if !p.matches_with(&readout.measurement, MATCH_OPTIONS) {
-				return self.invert;
-			},
+			Some(p) => {
+				if !p.matches_with(&readout.measurement, MATCH_OPTIONS) {
+					return self.invert;
+				}
+			}
 			None => (),
 		};
 
@@ -42,7 +43,7 @@ impl Select {
 
 impl Default for Select {
 	fn default() -> Self {
-		Self{
+		Self {
 			invert: false,
 			match_measurement: None,
 		}
@@ -68,16 +69,18 @@ pub struct Transpose {
 impl Filter for Transpose {
 	fn process(&self, mut readout: Arc<Readout>) -> Option<Arc<Readout>> {
 		if !self.predicate.matches(&readout) {
-			return Some(readout)
+			return Some(readout);
 		}
 
-		let mut new_samples = Vec::with_capacity(match readout.samples.len().checked_mul(readout.fields.len()) {
-			Some(v) => v,
-			None => {
-				warn!("overflow while trying to transpose sample, dropping");
-				return None
+		let mut new_samples = Vec::with_capacity(
+			match readout.samples.len().checked_mul(readout.fields.len()) {
+				Some(v) => v,
+				None => {
+					warn!("overflow while trying to transpose sample, dropping");
+					return None;
+				}
 			},
-		});
+		);
 
 		let readout_mut = Arc::make_mut(&mut readout);
 		readout_mut.tags.push(self.tag.clone());
@@ -85,13 +88,13 @@ impl Filter for Transpose {
 		for mut sample in readout_mut.samples.drain(..) {
 			if sample.fieldv.len() != readout_mut.fields.len() {
 				warn!("dropping malformed sample (incorrect field count)");
-				continue
+				continue;
 			}
 
 			for (field, value) in readout_mut.fields.iter().zip(sample.fieldv.drain(..)) {
 				let mut tagv = sample.tagv.clone();
 				tagv.push(field.clone());
-				new_samples.push(Sample{
+				new_samples.push(Sample {
 					tagv,
 					fieldv: vec![value],
 				});
@@ -117,7 +120,7 @@ pub struct TagToField {
 impl Filter for TagToField {
 	fn process(&self, mut readout: Arc<Readout>) -> Option<Arc<Readout>> {
 		if !self.predicate.matches(&readout) {
-			return Some(readout)
+			return Some(readout);
 		}
 
 		if readout.fields.len() > 1 {
@@ -137,15 +140,22 @@ impl Filter for TagToField {
 		let mut new_tagv = Vec::with_capacity(1);
 
 		for sample in readout_mut.samples.drain(..) {
-			let field_name = self.expr.replace(&sample.tagv[0][..], &self.field_name[..]).into();
+			let field_name = self
+				.expr
+				.replace(&sample.tagv[0][..], &self.field_name[..])
+				.into();
 			if new_tagv.len() == 0 {
-				new_tagv.push(self.expr.replace(&sample.tagv[0][..], &self.new_tag_value[..]).into());
+				new_tagv.push(
+					self.expr
+						.replace(&sample.tagv[0][..], &self.new_tag_value[..])
+						.into(),
+				);
 			}
 			readout_mut.fields.push(field_name);
 			new_fieldv.push(sample.fieldv[0]);
 		}
 
-		readout_mut.samples.push(Sample{
+		readout_mut.samples.push(Sample {
 			fieldv: new_fieldv,
 			tagv: new_tagv,
 		});

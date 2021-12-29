@@ -1,12 +1,12 @@
-use log::{warn};
+use log::warn;
 
 use tokio::sync::mpsc;
 
 use crate::pubsub;
 
-use super::traits;
-use super::payload;
 use super::adapter::Serializer;
+use super::payload;
+use super::traits;
 
 struct PubSubWorker {
 	client: pubsub::Client,
@@ -35,23 +35,14 @@ pub struct PubSubSink {
 }
 
 impl PubSubSink {
-	pub fn new(
-			api_url: String,
-			node_template: String,
-			override_host: Option<String>) -> Self {
+	pub fn new(api_url: String, node_template: String, override_host: Option<String>) -> Self {
 		let (serializer, samples) = Serializer::new(32);
-		let mut worker = PubSubWorker{
-			client: pubsub::Client::new(
-				api_url,
-				node_template,
-				override_host,
-			),
+		let mut worker = PubSubWorker {
+			client: pubsub::Client::new(api_url, node_template, override_host),
 			samples,
 		};
-		tokio::spawn(async move {
-			worker.run().await
-		});
-		Self{
+		tokio::spawn(async move { worker.run().await });
+		Self {
 			samples: serializer,
 		}
 	}

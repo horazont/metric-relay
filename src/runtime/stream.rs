@@ -1,4 +1,4 @@
-use log::{warn};
+use log::warn;
 
 use tokio::sync::mpsc;
 
@@ -6,8 +6,7 @@ use crate::stream::ArchiveWrite;
 
 use super::adapter::Serializer;
 use super::payload;
-use super::traits::{Source, Sink};
-
+use super::traits::{Sink, Source};
 
 struct ArchiveWorker {
 	inner: Box<dyn ArchiveWrite + Send + Sync + 'static>,
@@ -15,14 +14,12 @@ struct ArchiveWorker {
 }
 
 impl ArchiveWorker {
-	fn spawn(inner: Box<dyn ArchiveWrite + Send + Sync + 'static>, source: mpsc::Receiver<payload::Stream>) {
-		let mut worker = Self{
-			inner,
-			source,
-		};
-		tokio::spawn(async move {
-			worker.run().await
-		});
+	fn spawn(
+		inner: Box<dyn ArchiveWrite + Send + Sync + 'static>,
+		source: mpsc::Receiver<payload::Stream>,
+	) {
+		let mut worker = Self { inner, source };
+		tokio::spawn(async move { worker.run().await });
 	}
 
 	async fn run(&mut self) {
@@ -35,7 +32,7 @@ impl ArchiveWorker {
 				Ok(_) => (),
 				Err(e) => {
 					warn!("lost stream block: write to archive failed: {}", e);
-				},
+				}
 			}
 		}
 	}
@@ -49,9 +46,7 @@ impl Archiver {
 	pub fn new(inner: Box<dyn ArchiveWrite + Send + Sync + 'static>) -> Self {
 		let (serializer, source) = Serializer::new(32);
 		ArchiveWorker::spawn(inner, source);
-		Self{
-			serializer,
-		}
+		Self { serializer }
 	}
 }
 

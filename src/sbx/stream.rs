@@ -1,22 +1,21 @@
 use std::convert::TryFrom;
 use std::io;
 use std::sync::Arc;
-use std::time::{Duration as StdDuration};
+use std::time::Duration as StdDuration;
 
-use log::{warn};
+use log::warn;
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 
-use bytes::{Bytes, Buf};
+use bytes::{Buf, Bytes};
 
-use enum_map::{Enum};
+use enum_map::Enum;
 
 use crate::metric;
 use crate::stream;
 
 use super::frame;
 use super::rtcifier::{LinearRTC, RTCifier};
-
 
 #[derive(Debug, Clone, Copy, Enum)]
 pub enum StreamKind {
@@ -31,15 +30,19 @@ pub enum StreamKind {
 impl From<StreamKind> for metric::DevicePath {
 	fn from(k: StreamKind) -> Self {
 		let device_type = match k {
-			StreamKind::AccelX | StreamKind::AccelY | StreamKind::AccelZ => "lsm303d.accelerometer".into(),
-			StreamKind::CompassX | StreamKind::CompassY | StreamKind::CompassZ => "lsm303d.magnetometer".into(),
+			StreamKind::AccelX | StreamKind::AccelY | StreamKind::AccelZ => {
+				"lsm303d.accelerometer".into()
+			}
+			StreamKind::CompassX | StreamKind::CompassY | StreamKind::CompassZ => {
+				"lsm303d.magnetometer".into()
+			}
 		};
 		let instance = match k {
 			StreamKind::AccelX | StreamKind::CompassX => "i2c-1/1d/x".into(),
 			StreamKind::AccelY | StreamKind::CompassY => "i2c-1/1d/y".into(),
 			StreamKind::AccelZ | StreamKind::CompassZ => "i2c-1/1d/z".into(),
 		};
-		metric::DevicePath{
+		metric::DevicePath {
 			device_type,
 			instance,
 		}
@@ -65,12 +68,12 @@ impl TryFrom<frame::SbxMessageType> for StreamKind {
 
 #[derive(Debug, Clone)]
 pub enum Decompress {
-	Init{
+	Init {
 		first_sample: u16,
 		bitmap: Bytes,
 		payload: Bytes,
 	},
-	Data{
+	Data {
 		reference: u16,
 		bitmap_byte: u8,
 		bitmap_mask: u8,
@@ -90,7 +93,10 @@ impl Decompress {
 			remaining_payload -= 1;
 			bitmap_len += 1;
 			if packet.len() == 0 {
-				return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "packet ended while scanning bitmap"));
+				return Err(io::Error::new(
+					io::ErrorKind::UnexpectedEof,
+					"packet ended while scanning bitmap",
+				));
 			}
 			let next_bitmap_byte = packet.get_u8();
 
@@ -99,19 +105,23 @@ impl Decompress {
 				debug_assert!(mask != 0);
 				let bit = next_bitmap_byte & mask;
 				let compressed = bit != 0;
-				remaining_payload = match remaining_payload.checked_sub( if compressed { 1 } else { 2 }) {
-					Some(v) => v,
-					None => {
-						return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "packet is too short for given bitmap"))
-					}
-				};
+				remaining_payload =
+					match remaining_payload.checked_sub(if compressed { 1 } else { 2 }) {
+						Some(v) => v,
+						None => {
+							return Err(io::Error::new(
+								io::ErrorKind::UnexpectedEof,
+								"packet is too short for given bitmap",
+							))
+						}
+					};
 				if remaining_payload == 0 {
 					break;
 				}
 			}
 		}
 		let bitmap = bitmap.slice(..bitmap_len);
-		Ok(Self::Init{
+		Ok(Self::Init {
 			first_sample,
 			bitmap,
 			payload: packet,
@@ -136,11 +146,15 @@ impl Iterator for Decompress {
 
 	fn next(&mut self) -> Option<i16> {
 		match self {
-			Self::Init{first_sample, bitmap, payload} => {
+			Self::Init {
+				first_sample,
+				bitmap,
+				payload,
+			} => {
 				let first_sample_i16 = to_sint(*first_sample);
 				*self = if bitmap.len() > 0 {
 					let bitmap_byte = bitmap.get_u8();
-					Self::Data{
+					Self::Data {
 						reference: *first_sample,
 						bitmap: bitmap.clone(),
 						bitmap_byte,
@@ -151,13 +165,14 @@ impl Iterator for Decompress {
 					Self::Eof
 				};
 				Some(first_sample_i16)
-			},
-			Self::Data{
-					reference,
-					ref mut bitmap,
-					ref mut bitmap_byte,
-					ref mut bitmap_mask,
-					ref mut payload} => {
+			}
+			Self::Data {
+				reference,
+				ref mut bitmap,
+				ref mut bitmap_byte,
+				ref mut bitmap_mask,
+				ref mut payload,
+			} => {
 				let bit = (*bitmap_byte) & (*bitmap_mask);
 				let compressed = bit != 0;
 				let offset = if compressed {
@@ -181,19 +196,15 @@ impl Iterator for Decompress {
 					*bitmap_mask = 0x80;
 				}
 				Some(v)
-			},
+			}
 			Self::Eof => None,
 		}
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
 		match self {
-			Self::Init{payload, ..} => {
-				((payload.len() + 1) / 2 + 1, Some(payload.len() + 1))
-			},
-			Self::Data{payload, ..} => {
-				((payload.len() + 1) / 2, Some(payload.len()))
-			},
+			Self::Init { payload, .. } => ((payload.len() + 1) / 2 + 1, Some(payload.len() + 1)),
+			Self::Data { payload, .. } => ((payload.len() + 1) / 2, Some(payload.len())),
 			Self::Eof => (0, Some(0)),
 		}
 	}
@@ -213,9 +224,13 @@ pub struct StreamDecoder<T: stream::StreamBuffer + Sync + Send + 'static + ?Size
 impl<T: stream::StreamBuffer + Sync + Send + 'static> StreamDecoder<T> {
 	pub fn new(period: StdDuration, buffer: T, scale: metric::Value) -> Self {
 		if !buffer.valid_period(period) {
-			panic!("slice {} of buffer is not valid for period {:?}", buffer.slice(), period)
+			panic!(
+				"slice {} of buffer is not valid for period {:?}",
+				buffer.slice(),
+				period
+			)
 		}
-		Self{
+		Self {
 			rtcifier: LinearRTC::new(15, Duration::seconds(60), 2, 20000),
 			period,
 			scale,
@@ -235,14 +250,18 @@ impl<T: stream::StreamBuffer + Sync + Send + 'static> StreamDecoder<T> {
 		self.rtcifier.reset()
 	}
 
-	pub fn decode<'m>(&mut self, kind: StreamKind, message: &'m frame::SbxStreamMessage) -> io::Result<()> {
+	pub fn decode<'m>(
+		&mut self,
+		kind: StreamKind,
+		message: &'m frame::SbxStreamMessage,
+	) -> io::Result<()> {
 		let mut samples = Vec::new();
 		let iter = Decompress::new(message.avg, message.coded.clone())?;
 		samples.reserve(iter.size_hint().1.unwrap());
 		samples.extend(iter);
 		samples.shrink_to_fit();
 		let t0 = self.rtcifier.map_to_rtc(message.seq);
-		match self.buffer.write(&metric::StreamBlock{
+		match self.buffer.write(&metric::StreamBlock {
 			t0,
 			seq0: message.seq,
 			path: kind.into(),
@@ -343,7 +362,11 @@ mod tests {
 
 	#[test]
 	fn compressed_long() {
-		let mut dec = Decompress::new(2342u16, &b"\xff\xc0\x01\xff\x01\xff\x01\xff\x01\xff\x01\xff"[..]).unwrap();
+		let mut dec = Decompress::new(
+			2342u16,
+			&b"\xff\xc0\x01\xff\x01\xff\x01\xff\x01\xff\x01\xff"[..],
+		)
+		.unwrap();
 		match dec.next() {
 			Some(v) => assert_eq!(v, 2342i16),
 			other => panic!("unexpected next result: {:?}", other),

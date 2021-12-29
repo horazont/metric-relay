@@ -1,7 +1,7 @@
-use std::cmp::Ordering;
-use bytes::Bytes;
-use crate::serial::SerialNumber;
 use super::frame::DataFrame;
+use crate::serial::SerialNumber;
+use bytes::Bytes;
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone)]
 pub struct RecvQueue {
@@ -14,7 +14,7 @@ impl RecvQueue {
 	pub fn new(max_size: usize, lowest_sn: SerialNumber) -> RecvQueue {
 		let mut q = Vec::new();
 		q.reserve(max_size);
-		RecvQueue{
+		RecvQueue {
 			max_size,
 			lowest_sn,
 			q,
@@ -31,28 +31,29 @@ impl RecvQueue {
 			Some(v) => {
 				if v < 0 {
 					// too late, sorry
-					return
+					return;
 				} else if v as usize >= self.max_size {
 					// we cannot guarantee that we can hold all necessary frames in memory
-					return
+					return;
 				}
 				// otherwise its ok
 			}
 		};
-		let insert_index = match self.q.binary_search_by(|e| {
-			e.sn().partial_cmp(&sn).unwrap_or(Ordering::Equal)
-		}) {
+		let insert_index = match self
+			.q
+			.binary_search_by(|e| e.sn().partial_cmp(&sn).unwrap_or(Ordering::Equal))
+		{
 			// element exists already
 			Ok(_) => return,
 			Err(i) => i,
 		};
-		self.q.insert(insert_index, DataFrame{sn, payload: data});
+		self.q.insert(insert_index, DataFrame { sn, payload: data });
 	}
 
 	/// Try to read the next frame from the queue.
 	pub fn try_read(&mut self) -> Option<DataFrame> {
 		if self.q.len() == 0 {
-			return None
+			return None;
 		}
 		let first = &self.q[0];
 		if first.sn() <= self.lowest_sn {
@@ -87,7 +88,7 @@ impl RecvQueue {
 		let mut next_sn = self.lowest_sn;
 		for ref frame in self.q.iter() {
 			if frame.sn() != next_sn {
-				return next_sn - 1
+				return next_sn - 1;
 			}
 			next_sn = next_sn + 1
 		}
@@ -119,10 +120,10 @@ mod tests {
 		let mut q = RecvQueue::new(16, 0.into());
 		q.set(0u16.into(), (&b"foo"[..]).into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 0u16.into());
 				assert_eq!(payload, &b"foo"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 	}
@@ -133,17 +134,17 @@ mod tests {
 		q.set(1u16.into(), (&b"foo1"[..]).into());
 		q.set(0u16.into(), (&b"foo0"[..]).into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 0u16.into());
 				assert_eq!(payload, &b"foo0"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 1u16.into());
 				assert_eq!(payload, &b"foo1"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 	}
@@ -163,10 +164,10 @@ mod tests {
 
 		q.set(2u16.into(), (&b"foo2"[..]).into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 2u16.into());
 				assert_eq!(payload, &b"foo2"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?} from {:?}", other, q),
 		}
 	}
@@ -177,10 +178,10 @@ mod tests {
 		q.set(1u16.into(), (&b"foo"[..]).into());
 		q.mark_unreceivable_up_to(1u16.into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 1u16.into());
 				assert_eq!(payload, &b"foo"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 	}
@@ -191,10 +192,10 @@ mod tests {
 		q.set(1u16.into(), (&b"foo"[..]).into());
 		q.mark_unreceivable_up_to(5u16.into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 1u16.into());
 				assert_eq!(payload, &b"foo"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 	}
@@ -220,31 +221,31 @@ mod tests {
 		q.set(0u16.into(), (&b"foo0"[..]).into());
 		q.set(1u16.into(), (&b"foo1"[..]).into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 65534u16.into());
 				assert_eq!(payload, &b"foo-2"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 65535u16.into());
 				assert_eq!(payload, &b"foo-1"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 0u16.into());
 				assert_eq!(payload, &b"foo0"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 1u16.into());
 				assert_eq!(payload, &b"foo1"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 	}
@@ -265,10 +266,10 @@ mod tests {
 
 		q.set(30u16.into(), (&b"foo30"[..]).into());
 		match q.try_read() {
-			Some(DataFrame{sn, payload}) => {
+			Some(DataFrame { sn, payload }) => {
 				assert_eq!(sn, 30u16.into());
 				assert_eq!(payload, &b"foo30"[..]);
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		}
 	}

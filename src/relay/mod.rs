@@ -18,8 +18,8 @@
 //! timeout). This is essentially a counter which indicates the last data
 //! frame received and this can be used by peers to retransmit information
 //! after a connection has been reestablished.
-pub mod socket;
 pub mod frame;
+pub mod socket;
 
-pub use socket::{SendSocket, RecvSocket, SessionConfig};
 pub use frame::DataFrame;
+pub use socket::{RecvSocket, SendSocket, SessionConfig};

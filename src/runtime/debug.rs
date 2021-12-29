@@ -1,15 +1,15 @@
-use log::{debug, warn, error};
+use log::{debug, error, warn};
 
 use std::sync::Arc;
 
 use num_traits::float::FloatConst;
 
-use smartstring::alias::{String as SmartString};
+use smartstring::alias::String as SmartString;
 
 use tokio::select;
 use tokio::sync::broadcast;
-use tokio::sync::oneshot;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use core::time::Duration;
 
@@ -21,9 +21,9 @@ use rand::Rng;
 use crate::metric;
 use crate::stream;
 
-use super::traits;
+use super::adapter::{BufferedStream, BufferedStreamError, Serializer};
 use super::payload;
-use super::adapter::{Serializer, BufferedStream, BufferedStreamError};
+use super::traits;
 
 pub struct DebugStdoutSink {
 	samples: Serializer<payload::Sample>,
@@ -34,10 +34,7 @@ impl DebugStdoutSink {
 	pub fn new() -> DebugStdoutSink {
 		let (samples, samples_src) = Serializer::new(128);
 		let (stream, stream_src) = Serializer::new(128);
-		let result = DebugStdoutSink{
-			samples,
-			stream,
-		};
+		let result = DebugStdoutSink { samples, stream };
 		tokio::spawn(async move {
 			Self::process(samples_src, stream_src).await;
 			debug!("DebugStdoutSink terminating");
@@ -46,9 +43,9 @@ impl DebugStdoutSink {
 	}
 
 	async fn process(
-			mut samples: mpsc::Receiver<payload::Sample>,
-			mut stream: mpsc::Receiver<payload::Stream>)
-	{
+		mut samples: mpsc::Receiver<payload::Sample>,
+		mut stream: mpsc::Receiver<payload::Stream>,
+	) {
 		loop {
 			tokio::select! {
 				readouts = samples.recv() => match readouts {
@@ -97,23 +94,32 @@ pub struct RandomSource {
 }
 
 impl RandomSource {
-	pub fn new(interval: Duration, instance: SmartString, device_type: SmartString, components: metric::OrderedVec<SmartString, RandomComponent>) -> Self {
+	pub fn new(
+		interval: Duration,
+		instance: SmartString,
+		device_type: SmartString,
+		components: metric::OrderedVec<SmartString, RandomComponent>,
+	) -> Self {
 		let (sink, _) = broadcast::channel(8);
-		let result = Self{
-			sink,
-		};
+		let result = Self { sink };
 		result.spawn_into_background(interval, instance, device_type, components);
 		result
 	}
 
-	fn spawn_into_background(&self, interval: Duration, instance: SmartString, device_type: SmartString, components: metric::OrderedVec<SmartString, RandomComponent>) {
+	fn spawn_into_background(
+		&self,
+		interval: Duration,
+		instance: SmartString,
+		device_type: SmartString,
+		components: metric::OrderedVec<SmartString, RandomComponent>,
+	) {
 		let sink = self.sink.clone();
 		tokio::spawn(async move {
 			loop {
 				let timestamp = Utc::now();
-				let mut result = metric::Readout{
+				let mut result = metric::Readout {
 					timestamp,
-					path: metric::DevicePath{
+					path: metric::DevicePath {
 						instance: instance.clone(),
 						device_type: device_type.clone(),
 					},
@@ -122,10 +128,13 @@ impl RandomSource {
 				{
 					let mut rng = rand::thread_rng();
 					for (k, v) in components.iter() {
-						result.components.insert(k.clone(), metric::Value{
-							unit: v.unit.clone(),
-							magnitude: rng.gen::<f64>() * (v.max - v.min) + v.min,
-						});
+						result.components.insert(
+							k.clone(),
+							metric::Value {
+								unit: v.unit.clone(),
+								magnitude: rng.gen::<f64>() * (v.max - v.min) + v.min,
+							},
+						);
 					}
 				}
 				match sink.send(vec![Arc::new(result)]) {
@@ -171,17 +180,23 @@ pub struct SineSourceWorker<T: stream::StreamBuffer + Send + Sync + 'static + ?S
 }
 
 impl<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> SineSourceWorker<T> {
-	pub fn start(nsamples: u16, sample_period: Duration, path: metric::DevicePath, scale: metric::Value, cfg: SineConfig, buffer: Box<T>, sink: broadcast::Sender<payload::Stream>, stop_ch: oneshot::Receiver<()>) {
-		let mut worker = SineSourceWorker{
+	pub fn start(
+		nsamples: u16,
+		sample_period: Duration,
+		path: metric::DevicePath,
+		scale: metric::Value,
+		cfg: SineConfig,
+		buffer: Box<T>,
+		sink: broadcast::Sender<payload::Stream>,
+		stop_ch: oneshot::Receiver<()>,
+	) {
+		let mut worker = SineSourceWorker {
 			nsamples,
 			sample_period,
 			path,
 			scale,
 			cfg,
-			sink: BufferedStream::new(
-				buffer,
-				sink,
-			),
+			sink: BufferedStream::new(buffer, sink),
 			seq: 0,
 			sint: 0,
 			stop_ch,
@@ -212,8 +227,8 @@ impl<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> SineSourceWorker<
 				let v = (vf.max(-1.0).min(1.0) * i16::MAX as f64).round() as i16;
 				buf.push(v);
 				self.sint = self.sint.wrapping_add(1);
-			};
-			match self.sink.send(Arc::new(metric::StreamBlock{
+			}
+			match self.sink.send(Arc::new(metric::StreamBlock {
 				t0,
 				seq0,
 				path: self.path.clone(),
@@ -224,7 +239,7 @@ impl<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized> SineSourceWorker<
 				Ok(_) => (),
 				Err(BufferedStreamError::BufferWriteError(e)) => {
 					error!("sine stream block lost: {}", e);
-				},
+				}
 				Err(BufferedStreamError::SendError(_)) => warn!("sine stream lost, no receivers"),
 			};
 		}
@@ -238,7 +253,14 @@ pub struct SineSource {
 }
 
 impl SineSource {
-	pub fn new<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized>(nsamples: u16, sample_period: Duration, path: metric::DevicePath, scale: metric::Value, cfg: SineConfig, buffer: Box<T>) -> Self {
+	pub fn new<T: stream::StreamBuffer + Send + Sync + 'static + ?Sized>(
+		nsamples: u16,
+		sample_period: Duration,
+		path: metric::DevicePath,
+		scale: metric::Value,
+		cfg: SineConfig,
+		buffer: Box<T>,
+	) -> Self {
 		let (guard, stop_ch) = oneshot::channel();
 		let (zygote, _) = broadcast::channel(8);
 		SineSourceWorker::start(
@@ -251,10 +273,7 @@ impl SineSource {
 			zygote.clone(),
 			stop_ch,
 		);
-		Self{
-			zygote,
-			guard,
-		}
+		Self { zygote, guard }
 	}
 }
 

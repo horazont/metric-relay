@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use log::warn;
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 
 /// Map a local high-range, high-precision counter to a remote low-range counter of the same precision.
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub struct Timeline {
 
 impl Timeline {
 	pub fn new(slack: u16) -> Timeline {
-		Timeline{
+		Timeline {
 			remote_tip: 0,
 			local_tip: 0,
 			slack: slack as i32,
@@ -27,15 +27,18 @@ impl Timeline {
 		let back_diff = v2.wrapping_sub(v1) as i32;
 
 		if back_diff < self.slack {
-			return -back_diff
+			return -back_diff;
 		}
 
-		return fwd_diff
+		return fwd_diff;
 	}
 
 	pub fn feed_and_transform(&mut self, remote: u16) -> i64 {
 		let change = self.wraparound_aware_minus(remote, self.remote_tip);
-		self.local_tip = self.local_tip.checked_add(change as i64).expect("should've reset in between *shrug*");
+		self.local_tip = self
+			.local_tip
+			.checked_add(change as i64)
+			.expect("should've reset in between *shrug*");
 		self.remote_tip = remote;
 		self.local_tip
 	}
@@ -48,7 +51,10 @@ impl Timeline {
 	#[cfg(test)]
 	pub fn forward(&mut self, offset: i64) {
 		assert!(offset >= 0);
-		self.local_tip = self.local_tip.checked_add(offset).expect("should've reset before");
+		self.local_tip = self
+			.local_tip
+			.checked_add(offset)
+			.expect("should've reset before");
 		self.remote_tip = self.remote_tip.wrapping_add(offset as u16);
 	}
 }
@@ -64,7 +70,14 @@ mod tests_timeline {
 	#[test]
 	fn test_feed_and_transform_monotonically() {
 		let mut tl = new_tl();
-		for i in std::iter::successors(Some(0), |&prev| { let next = prev + 100; if next < 65536 { Some(next) } else { None } }) {
+		for i in std::iter::successors(Some(0), |&prev| {
+			let next = prev + 100;
+			if next < 65536 {
+				Some(next)
+			} else {
+				None
+			}
+		}) {
 			let i_16 = i as u16;
 			assert_eq!(i, tl.feed_and_transform(i_16));
 		}
@@ -144,7 +157,14 @@ mod tests_timeline {
 		let mut tl = new_tl();
 		tl.reset(1000);
 		assert_eq!(0, tl.feed_and_transform(1000));
-		for i in std::iter::successors(Some(1000), |&prev| { let next = prev + 100; if next < 65536 { Some(next) } else { None } }) {
+		for i in std::iter::successors(Some(1000), |&prev| {
+			let next = prev + 100;
+			if next < 65536 {
+				Some(next)
+			} else {
+				None
+			}
+		}) {
 			let i_16 = i as u16;
 			assert_eq!(i - 1000, tl.feed_and_transform(i_16));
 		}
@@ -166,8 +186,8 @@ mod tests_timeline {
 	#[test]
 	fn test_forward_wrapping() {
 		let mut tl = new_tl();
-		tl.forward(2*65536 + 5);
-		assert_eq!(2*65536 + 10, tl.feed_and_transform(10));
+		tl.forward(2 * 65536 + 5);
+		assert_eq!(2 * 65536 + 10, tl.feed_and_transform(10));
 	}
 }
 
@@ -190,12 +210,17 @@ pub struct LinearRTC {
 }
 
 impl LinearRTC {
-	pub fn new(max_history: usize, max_difference: Duration, init_history: usize, timeline_slack: u16) -> LinearRTC {
+	pub fn new(
+		max_history: usize,
+		max_difference: Duration,
+		init_history: usize,
+		timeline_slack: u16,
+	) -> LinearRTC {
 		// real limit is i32, but I am too lazy to calculate that
 		// limit is because of the Duration div impl
 		assert!(max_history < 65535);
 		let bogus_date = Utc::now() - Duration::days(10);
-		LinearRTC{
+		LinearRTC {
 			max_difference,
 			max_history,
 			init_history,
@@ -214,12 +239,7 @@ impl LinearRTC {
 
 impl Default for LinearRTC {
 	fn default() -> Self {
-		Self::new(
-			1500,
-			Duration::seconds(60),
-			1,
-			30000,
-		)
+		Self::new(1500, Duration::seconds(60), 1, 30000)
 	}
 }
 
@@ -241,19 +261,21 @@ impl RTCifier for LinearRTC {
 
 		let mut deviation_sum = Duration::zero();
 		for (hist_rtc, hist_offset) in self.history.iter() {
-			deviation_sum = deviation_sum + ((*hist_rtc - Duration::milliseconds(*hist_offset)) - rtc);
+			deviation_sum =
+				deviation_sum + ((*hist_rtc - Duration::milliseconds(*hist_offset)) - rtc);
 		}
 		let deviation_avg = deviation_sum / (self.history.len() as i32);
 
 		let new_rtcbase = rtc + deviation_avg;
 
-		self.rtcbase = if deviation_avg >= self.max_difference || deviation_avg <= -self.max_difference {
-			self.history.swap_remove_back(0);
-			self.history.truncate(1);
-			rtc
-		} else {
-			new_rtcbase
-		};
+		self.rtcbase =
+			if deviation_avg >= self.max_difference || deviation_avg <= -self.max_difference {
+				self.history.swap_remove_back(0);
+				self.history.truncate(1);
+				rtc
+			} else {
+				new_rtcbase
+			};
 
 		self.timeline.reset(new_ref);
 	}
@@ -278,12 +300,7 @@ mod tests_rtcifier {
 	use chrono::TimeZone;
 
 	fn new_rtcifier() -> LinearRTC {
-		LinearRTC::new(
-			1500,
-			Duration::seconds(60),
-			1,
-			1000,
-		)
+		LinearRTC::new(1500, Duration::seconds(60), 1, 1000)
 	}
 
 	fn truncated_utcnow() -> DateTime<Utc> {
@@ -314,15 +331,33 @@ mod tests_rtcifier {
 
 		rtcifier.align(dt0, t0);
 
-		assert_eq!(rtcifier.map_to_rtc(65500), dt0 + Duration::milliseconds(500));
-		assert_eq!(rtcifier.map_to_rtc(65200), dt0 + Duration::milliseconds(200));
-		assert_eq!(rtcifier.map_to_rtc(64800), dt0 - Duration::milliseconds(200));
+		assert_eq!(
+			rtcifier.map_to_rtc(65500),
+			dt0 + Duration::milliseconds(500)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(65200),
+			dt0 + Duration::milliseconds(200)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(64800),
+			dt0 - Duration::milliseconds(200)
+		);
 
 		rtcifier.align(dt1, t1);
 
-		assert_eq!(rtcifier.map_to_rtc(65500), dt0 + Duration::milliseconds(500));
-		assert_eq!(rtcifier.map_to_rtc(65200), dt0 + Duration::milliseconds(200));
-		assert_eq!(rtcifier.map_to_rtc(64800), dt0 - Duration::milliseconds(200));
+		assert_eq!(
+			rtcifier.map_to_rtc(65500),
+			dt0 + Duration::milliseconds(500)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(65200),
+			dt0 + Duration::milliseconds(200)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(64800),
+			dt0 - Duration::milliseconds(200)
+		);
 	}
 
 	#[test]
@@ -337,10 +372,16 @@ mod tests_rtcifier {
 		assert_eq!(rtcifier.map_to_rtc(1000), dt0 + Duration::seconds(1));
 
 		rtcifier.align(dt0 + Duration::seconds(3), 2000);
-		assert_eq!(rtcifier.map_to_rtc(2000), dt0 + Duration::nanoseconds(2333333334));
+		assert_eq!(
+			rtcifier.map_to_rtc(2000),
+			dt0 + Duration::nanoseconds(2333333334)
+		);
 
 		rtcifier.align(dt0 + Duration::seconds(4), 3000);
-		assert_eq!(rtcifier.map_to_rtc(3000), dt0 + Duration::milliseconds(3500));
+		assert_eq!(
+			rtcifier.map_to_rtc(3000),
+			dt0 + Duration::milliseconds(3500)
+		);
 	}
 
 	#[test]
@@ -355,7 +396,10 @@ mod tests_rtcifier {
 		assert_eq!(rtcifier.map_to_rtc(1000), dt0 + Duration::seconds(1));
 
 		rtcifier.align(dt0 + Duration::seconds(3), 2000);
-		assert_eq!(rtcifier.map_to_rtc(2000), dt0 + Duration::nanoseconds(2333333334));
+		assert_eq!(
+			rtcifier.map_to_rtc(2000),
+			dt0 + Duration::nanoseconds(2333333334)
+		);
 
 		rtcifier.align(dt0 + Duration::seconds(120), 3000);
 		assert_eq!(rtcifier.map_to_rtc(3000), dt0 + Duration::seconds(120));
@@ -363,7 +407,7 @@ mod tests_rtcifier {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Range{
+struct Range {
 	lower: i64,
 	upper: i64,
 }
@@ -409,7 +453,10 @@ impl Range {
 				self.lower += 1000;
 				self.upper += 1000;
 			}
-			warn!("Range got reconciled into a zero-sized range. clock jitter? {} {} {} {} => {} {}", curr_lower, curr_upper, new_lower, new_upper, self.lower, self.upper);
+			warn!(
+				"Range got reconciled into a zero-sized range. clock jitter? {} {} {} {} => {} {}",
+				curr_lower, curr_upper, new_lower, new_upper, self.lower, self.upper
+			);
 		}
 
 		self.shift(0);
@@ -417,7 +464,7 @@ impl Range {
 }
 
 #[derive(Debug)]
-struct State{
+struct State {
 	rtc: DateTime<Utc>,
 }
 
@@ -430,7 +477,7 @@ pub struct RangeRTC {
 
 impl RangeRTC {
 	pub fn new(timeline_slack: u16) -> Self {
-		Self{
+		Self {
 			timeline: Timeline::new(timeline_slack),
 			range: None,
 			state: None,
@@ -452,10 +499,10 @@ impl RTCifier for RangeRTC {
 	fn align(&mut self, rtc: DateTime<Utc>, timestamp: u16) {
 		let state = match self.state.as_mut() {
 			None => {
-				self.state = Some(State{rtc});
+				self.state = Some(State { rtc });
 				self.timeline.reset(timestamp);
 				return;
-			},
+			}
 			Some(st) => st,
 		};
 
@@ -480,7 +527,12 @@ impl RTCifier for RangeRTC {
 			// TODO: somehow aggregate the switch points
 			state.rtc = rtc;
 			match self.range.as_mut() {
-				None => self.range = Some(Range{lower: lower_bound, upper: upper_bound}),
+				None => {
+					self.range = Some(Range {
+						lower: lower_bound,
+						upper: upper_bound,
+					})
+				}
 				Some(r) => r.reconcile(lower_bound, upper_bound),
 			};
 			// println!("{:?} {} {}", self.range, lower_bound, upper_bound);
@@ -515,7 +567,7 @@ pub struct RangeRTCv2 {
 #[cfg(feature = "unstable-rtcs")]
 impl RangeRTCv2 {
 	pub fn new(timeline_slack: u16) -> Self {
-		Self{
+		Self {
 			timeline: Timeline::new(timeline_slack),
 			range: None,
 			state: None,
@@ -544,7 +596,7 @@ impl RTCifier for RangeRTCv2 {
 				self.state = Some((rtc, timestamp, timestamp));
 				self.timeline.reset(timestamp);
 				return;
-			},
+			}
 			Some(st) => st,
 		};
 
@@ -595,7 +647,7 @@ pub struct FilteredRTC {
 #[cfg(feature = "unstable-rtcs")]
 impl FilteredRTC {
 	pub fn new(timeline_slack: u16, history: usize) -> Self {
-		Self{
+		Self {
 			timeline: Timeline::new(timeline_slack),
 			rangertc: RangeRTC::new(timeline_slack),
 			offsets: Vec::new(),
@@ -639,7 +691,7 @@ fn ring_median(vs: &[i64]) -> Option<i64> {
 				// contiguous
 				(0, 0)
 			}
-		},
+		}
 	};
 	let mapped_index1 = (index + ioffset).rem_euclid(len);
 
@@ -724,7 +776,10 @@ mod test_ring_median {
 
 	#[test]
 	fn testcase1() {
-		let mut vs = vec![-905, -905, -919, -918, -931, -931, -944, -944, -957, -957, -970, -970, -983, -983, -996, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74];
+		let mut vs = vec![
+			-905, -905, -919, -918, -931, -931, -944, -944, -957, -957, -970, -970, -983, -983,
+			-996, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74,
+		];
 		vs.sort();
 		assert_eq!(ring_median(&vs).unwrap(), 17);
 	}
@@ -732,28 +787,48 @@ mod test_ring_median {
 	#[test]
 	#[ignore]
 	fn testcase1_1() {
-		let mut vs = vec![-905, -905, -919, -918, -931, -931, -944, -944, -957, -957, -970, -970, -983, -983, -983, -996, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74];
+		let mut vs = vec![
+			-905, -905, -919, -918, -931, -931, -944, -944, -957, -957, -970, -970, -983, -983,
+			-983, -996, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74,
+		];
 		vs.sort();
 		assert_eq!(ring_median(&vs).unwrap(), 17);
 	}
 
 	#[test]
 	fn testcase2() {
-		let mut vs = vec![-983, -983, -997, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74, -74, -87, -87, -100, -100, -113];
+		let mut vs = vec![
+			-983, -983, -997, -996, -9, -9, -22, -22, -35, -35, -48, -48, -61, -61, -74, -74, -87,
+			-87, -100, -100, -113,
+		];
 		vs.sort();
 		assert_eq!(ring_median(&vs).unwrap(), -48);
 	}
 
 	#[test]
 	fn testcase2_1() {
-		let mut vs = vec![-983, -983, -997, -996, -9, -9, -22, -22, -35, -35, -48, -48, -48, -61, -61, -74, -74, -87, -87, -100, -100, -113];
+		let mut vs = vec![
+			-983, -983, -997, -996, -9, -9, -22, -22, -35, -35, -48, -48, -48, -61, -61, -74, -74,
+			-87, -87, -100, -100, -113,
+		];
 		vs.sort();
 		assert_eq!(ring_median(&vs).unwrap(), -48);
 	}
 
 	#[test]
 	fn testcase3() {
-		let mut vs = vec![-936, -936, -949, -949, -962, -962, -975, -975, -988, -988, -1, -1, -1, -991, -992, -991, -992, -991, -992, -992, -992, -991, -992, -991, -992, -991, -992, -992, -992, -991, -991, -991, -992, -992, -992, -991, -991, -991, -992, -991, -992, -992, -991, -992, -991, -991, -992, -991, -992, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -999, -998, -999, -999, -999, -998, -998, -998, -999, -998, -999, -999, -999, -998, -998, -998, -999, -998, -998, -999, -998, -998, -998, -998, -999, -998, -999, -998, -999, -998, -999, -998, -999, -998, -999, -998, -999, -998, -999, -998];
+		let mut vs = vec![
+			-936, -936, -949, -949, -962, -962, -975, -975, -988, -988, -1, -1, -1, -991, -992,
+			-991, -992, -991, -992, -992, -992, -991, -992, -991, -992, -991, -992, -992, -992,
+			-991, -991, -991, -992, -992, -992, -991, -991, -991, -992, -991, -992, -992, -991,
+			-992, -991, -991, -992, -991, -992, -995, -995, -995, -995, -995, -995, -995, -995,
+			-995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995,
+			-995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995, -995,
+			-995, -995, -995, -999, -998, -999, -999, -999, -998, -998, -998, -999, -998, -999,
+			-999, -999, -998, -998, -998, -999, -998, -998, -999, -998, -998, -998, -998, -999,
+			-998, -999, -998, -999, -998, -999, -998, -999, -998, -999, -998, -999, -998, -999,
+			-998,
+		];
 		vs.sort();
 		assert_eq!(ring_median(&vs).unwrap(), -995);
 	}
@@ -818,7 +893,6 @@ impl RTCifier for FilteredRTC {
 	}
 }
 
-
 #[cfg(test)]
 mod test_rtcifierv2 {
 	use super::*;
@@ -830,7 +904,10 @@ mod test_rtcifierv2 {
 
 	#[test]
 	fn test_range_shift_operates_mod_1000() {
-		let mut r = Range{lower: -10, upper: 0};
+		let mut r = Range {
+			lower: -10,
+			upper: 0,
+		};
 		r.shift(500);
 		assert_eq!(r.lower, -510);
 		assert_eq!(r.upper, -500);
@@ -844,7 +921,10 @@ mod test_rtcifierv2 {
 
 	#[test]
 	fn test_reconcile_handles_shrinking_lower_bound() {
-		let mut r = Range{lower: -30, upper: -10};
+		let mut r = Range {
+			lower: -30,
+			upper: -10,
+		};
 		r.reconcile(-25, 0);
 		assert_eq!(r.lower, -25);
 		assert_eq!(r.upper, -10);
@@ -852,7 +932,10 @@ mod test_rtcifierv2 {
 
 	#[test]
 	fn test_reconcile_handles_shrinking_upper_bound() {
-		let mut r = Range{lower: -1010, upper: -990};
+		let mut r = Range {
+			lower: -1010,
+			upper: -990,
+		};
 		r.reconcile(-25, 0);
 		assert_eq!(r.lower, -10);
 		assert_eq!(r.upper, 0);
@@ -911,10 +994,22 @@ mod test_rtcifierv2 {
 		rtcifier.align(dt1, 1300);
 		assert!(rtcifier.ready());
 
-		assert_eq!(rtcifier.map_to_rtc(1285), Utc.ymd(2021, 8, 1).and_hms(17, 3, 16));
-		assert_eq!(rtcifier.map_to_rtc(1300), Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 16, 15));
-		assert_eq!(rtcifier.map_to_rtc(1400), Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 16, 115));
-		assert_eq!(rtcifier.map_to_rtc(2300), Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 17, 15));
+		assert_eq!(
+			rtcifier.map_to_rtc(1285),
+			Utc.ymd(2021, 8, 1).and_hms(17, 3, 16)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(1300),
+			Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 16, 15)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(1400),
+			Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 16, 115)
+		);
+		assert_eq!(
+			rtcifier.map_to_rtc(2300),
+			Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 17, 15)
+		);
 	}
 
 	#[test]
@@ -930,7 +1025,10 @@ mod test_rtcifierv2 {
 		rtcifier.align(dt2, 2290);
 		// lower bound is 270, upper bound is 290 -> midpoint is
 
-		assert_eq!(rtcifier.map_to_rtc(2290), Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 17, 10));
+		assert_eq!(
+			rtcifier.map_to_rtc(2290),
+			Utc.ymd(2021, 8, 1).and_hms_milli(17, 3, 17, 10)
+		);
 	}
 }
 
@@ -946,7 +1044,7 @@ struct RangeRTCLioriState {
 #[cfg(feature = "unstable-rtcs")]
 impl RangeRTCLioriState {
 	fn new(rtc: DateTime<Utc>, abs_ctr: i64) -> Self {
-		Self{
+		Self {
 			rtc_epoch: rtc,
 			prev_rtc: rtc,
 			prev_abs_ctr: abs_ctr,
@@ -958,11 +1056,8 @@ impl RangeRTCLioriState {
 	fn shift(&mut self, offset: i64) {
 		match self.rolling_average {
 			Some(previous) => {
-				self.rolling_average = Some(
-					(previous - (previous >> 1)) +
-					(offset >> 1)
-				);
-			},
+				self.rolling_average = Some((previous - (previous >> 1)) + (offset >> 1));
+			}
 			None => self.rolling_average = Some(offset),
 		}
 	}
@@ -985,7 +1080,7 @@ pub struct RangeRTCLiori {
 #[cfg(feature = "unstable-rtcs")]
 impl RangeRTCLiori {
 	pub fn new(timeline_slack: u16, hist_size: usize) -> Self {
-		Self{
+		Self {
 			timeline: Timeline::new(timeline_slack),
 			state: None,
 			min_hist: VecDeque::with_capacity(hist_size),
@@ -1022,11 +1117,9 @@ impl RTCifier for RangeRTCLiori {
 		let state = match self.state.as_mut() {
 			None => {
 				self.timeline.reset(timestamp);
-				self.state = Some(RangeRTCLioriState::new(
-					rtc, 0
-				));
+				self.state = Some(RangeRTCLioriState::new(rtc, 0));
 				return;
-			},
+			}
 			Some(st) => st,
 		};
 
@@ -1046,8 +1139,6 @@ impl RTCifier for RangeRTCLiori {
 			}
 			self.min_hist.push_back(post_change_diff_ms);
 			self.max_hist.push_back(pre_change_diff_ms);
-
-
 		}
 		state.prev_abs_ctr = abs_ctr;
 		state.prev_rtc = rtc;

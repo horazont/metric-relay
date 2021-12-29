@@ -3,14 +3,13 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::sync::Arc;
 
-use log::{trace};
+use log::trace;
 
-use chrono::{Duration, DateTime, Utc, DurationRound};
+use chrono::{DateTime, Duration, DurationRound, Utc};
 
 use crate::metric;
 use crate::metric::{MaskedArray, MaskedArrayWriter};
 use crate::serial::SerialNumber;
-
 
 #[derive(Debug, Clone, Copy)]
 pub enum WriteError {
@@ -91,7 +90,7 @@ struct BufferedBlock {
 
 impl From<BufferedBlock> for metric::StreamBlock {
 	fn from(other: BufferedBlock) -> Self {
-		Self{
+		Self {
 			t0: other.t0,
 			seq0: other.seq0.into(),
 			path: other.path,
@@ -114,7 +113,7 @@ pub struct InMemoryBuffer {
 
 impl InMemoryBuffer {
 	pub fn new(slice: Duration) -> Self {
-		Self{
+		Self {
 			reference: None,
 			next_block: None,
 			emit_blocks: VecDeque::new(),
@@ -132,24 +131,35 @@ impl InMemoryBuffer {
 	///
 	/// If no reference is available or if it is too far off, the timestamp
 	/// and sequence number of the incoming blocks metadata will be used.
-	fn match_reference(&mut self, t0: DateTime<Utc>, seq0: SerialNumber, period: Duration) -> (DateTime<Utc>, DateTime<Utc>, SerialNumber) {
+	fn match_reference(
+		&mut self,
+		t0: DateTime<Utc>,
+		seq0: SerialNumber,
+		period: Duration,
+	) -> (DateTime<Utc>, DateTime<Utc>, SerialNumber) {
 		let in_block_t0 = t0.duration_trunc(period).unwrap();
 		let out_block_t0 = in_block_t0.duration_trunc(self.slice).unwrap();
-		let time_based_out_block_seq0 = seq0 - (
-			((in_block_t0 - out_block_t0).num_nanoseconds().unwrap() / period.num_nanoseconds().unwrap()) as u16
-		);
+		let time_based_out_block_seq0 = seq0
+			- (((in_block_t0 - out_block_t0).num_nanoseconds().unwrap()
+				/ period.num_nanoseconds().unwrap()) as u16);
 
 		match self.reference {
 			None => {
-				trace!("using inbound block {} @ {} as reference; mapped to outbound block {} @ {}", t0, seq0, out_block_t0, time_based_out_block_seq0);
+				trace!(
+					"using inbound block {} @ {} as reference; mapped to outbound block {} @ {}",
+					t0,
+					seq0,
+					out_block_t0,
+					time_based_out_block_seq0
+				);
 				(in_block_t0, out_block_t0, time_based_out_block_seq0)
-			},
+			}
 			Some((ref_t0, ref_seq0)) => {
 				// NOTE: this assumes that output blocks are smaller than 20k samples, because counter wraparound happens at 60ksamples and we need some headroom
 				let dt = t0 - ref_t0;
 				if dt > period * 32765 {
 					// too far in the future, we have to resync
-						trace!("matching inbound block {} @ {} to outbound block {} @ {} by timestamp because timestamp is too far in the future", t0, seq0, out_block_t0, time_based_out_block_seq0);
+					trace!("matching inbound block {} @ {} to outbound block {} @ {} by timestamp because timestamp is too far in the future", t0, seq0, out_block_t0, time_based_out_block_seq0);
 					(in_block_t0, out_block_t0, time_based_out_block_seq0)
 				} else {
 					// we can meaningfully look at the sequence number, because streams never move backwards
@@ -160,21 +170,23 @@ impl InMemoryBuffer {
 							let dseq = seq0 - ref_seq0;
 							assert!(dseq > 0);
 							let dseq = dseq as u16;
-							let samples_per_block = (self.slice.num_nanoseconds().unwrap() / period.num_nanoseconds().unwrap()) as u16;
+							let samples_per_block = (self.slice.num_nanoseconds().unwrap()
+								/ period.num_nanoseconds().unwrap()) as u16;
 							let in_block_t0 = ref_t0 + period * dseq as i32;
 							let out_block_t0 = in_block_t0.duration_trunc(self.slice).unwrap();
-							let out_block_seq0 = ref_seq0 + (dseq / samples_per_block) * samples_per_block;
+							let out_block_seq0 =
+								ref_seq0 + (dseq / samples_per_block) * samples_per_block;
 							trace!("matching inbound block {} @ {} to outbound block {} @ {} by sequence number (dseq={}, ref_seq0={}, ref_t0={})", t0, seq0, out_block_t0, out_block_seq0, dseq, ref_seq0, ref_t0);
 							(in_block_t0, out_block_t0, out_block_seq0.into())
-						},
+						}
 						Some(Ordering::Less) | None => {
 							// sequence number is moving backward............. let's give time based matching a shot
 							trace!("matching inbound block {} @ {} to outbound block {} @ {} by timestamp because sequence number is in the past/too far in the future", t0, seq0, out_block_t0, time_based_out_block_seq0);
 							(in_block_t0, out_block_t0, time_based_out_block_seq0)
-						},
+						}
 					}
 				}
-			},
+			}
 		}
 	}
 }
@@ -190,7 +202,8 @@ impl StreamBuffer for InMemoryBuffer {
 			return Err(WriteError::InvalidPeriod);
 		}
 
-		let samples_per_block = self.slice.num_nanoseconds().unwrap() / period.num_nanoseconds().unwrap();
+		let samples_per_block =
+			self.slice.num_nanoseconds().unwrap() / period.num_nanoseconds().unwrap();
 		let samples_per_block = if samples_per_block <= 0 || samples_per_block >= 20000 {
 			return Err(WriteError::InvalidPeriod);
 		} else {
@@ -198,13 +211,17 @@ impl StreamBuffer for InMemoryBuffer {
 		};
 
 		let in_block_seq0: SerialNumber = block.seq0.into();
-		let (_, out_block_t0, out_block_seq0) = self.match_reference(block.t0, in_block_seq0, period);
+		let (_, out_block_t0, out_block_seq0) =
+			self.match_reference(block.t0, in_block_seq0, period);
 
 		let next_block = match self.next_block.as_mut() {
 			None => {
 				// TODO: use Option::insert once available
-				trace!("starting new block at t0 = {} [no existing block]", out_block_t0);
-				self.next_block = Some(BufferedBlock{
+				trace!(
+					"starting new block at t0 = {} [no existing block]",
+					out_block_t0
+				);
+				self.next_block = Some(BufferedBlock {
 					period,
 					t0: out_block_t0,
 					seq0: out_block_seq0,
@@ -214,28 +231,38 @@ impl StreamBuffer for InMemoryBuffer {
 				});
 				self.update_reference();
 				self.next_block.as_mut().unwrap()
-			},
-			Some(v) => if period == v.period && block.scale == v.scale && block.path == v.path && v.seq0 <= in_block_seq0 && in_block_seq0 < v.seq0 + (v.data.capacity() as u16) {
-				v
-			} else {
-				// we have to flush the current block to allow a safe overwrite of self.next_block
-				drop(v);
-				let next_block = self.next_block.take().unwrap();
-				// TODO: smarter interpolation
-				self.emit_blocks.push_back(next_block.into());
+			}
+			Some(v) => {
+				if period == v.period
+					&& block.scale == v.scale
+					&& block.path == v.path
+					&& v.seq0 <= in_block_seq0
+					&& in_block_seq0 < v.seq0 + (v.data.capacity() as u16)
+				{
+					v
+				} else {
+					// we have to flush the current block to allow a safe overwrite of self.next_block
+					drop(v);
+					let next_block = self.next_block.take().unwrap();
+					// TODO: smarter interpolation
+					self.emit_blocks.push_back(next_block.into());
 
-				trace!("starting new block at t0 = {} [mismatching parameters]", out_block_t0);
-				self.next_block = Some(BufferedBlock{
-					period,
-					t0: out_block_t0,
-					seq0: out_block_seq0,
-					path: block.path.clone(),
-					scale: block.scale.clone(),
-					data: MaskedArray::masked_with_value(samples_per_block, 0).into(),
-				});
-				self.update_reference();
-				self.next_block.as_mut().unwrap()
-			},
+					trace!(
+						"starting new block at t0 = {} [mismatching parameters]",
+						out_block_t0
+					);
+					self.next_block = Some(BufferedBlock {
+						period,
+						t0: out_block_t0,
+						seq0: out_block_seq0,
+						path: block.path.clone(),
+						scale: block.scale.clone(),
+						data: MaskedArray::masked_with_value(samples_per_block, 0).into(),
+					});
+					self.update_reference();
+					self.next_block.as_mut().unwrap()
+				}
+			}
 		};
 
 		let relative_in_seq0 = (in_block_seq0 - next_block.seq0) as usize;
@@ -253,7 +280,10 @@ impl StreamBuffer for InMemoryBuffer {
 			next_block.data.capacity() - relative_in_seq0
 		};
 
-		assert_eq!(max_take != (relative_in_seq1 - relative_in_seq0), max_take < block.data.len());
+		assert_eq!(
+			max_take != (relative_in_seq1 - relative_in_seq0),
+			max_take < block.data.len()
+		);
 
 		let mut overhang: Vec<i16> = Vec::new();
 
@@ -270,7 +300,8 @@ impl StreamBuffer for InMemoryBuffer {
 		if next_block.data.cursor() == next_block.data.capacity() {
 			// emit the block
 			drop(next_block);
-			self.emit_blocks.push_back(self.next_block.take().unwrap().into());
+			self.emit_blocks
+				.push_back(self.next_block.take().unwrap().into());
 		} else {
 			drop(next_block);
 		}
@@ -279,7 +310,7 @@ impl StreamBuffer for InMemoryBuffer {
 		if overhang.len() > 0 {
 			let new_t0 = out_block_t0 + self.slice;
 			trace!("starting new block at t0 = {}  [overhang]", new_t0);
-			self.next_block = Some(BufferedBlock{
+			self.next_block = Some(BufferedBlock {
 				period,
 				// NOTE: we are deliberately ignoring the t0 of the inbound block here
 				// the idea is that we do not have to rely on potentially incorrect clocks in such cases
@@ -289,7 +320,8 @@ impl StreamBuffer for InMemoryBuffer {
 				path: block.path.clone(),
 				scale: block.scale.clone(),
 				data: {
-					let mut data: MaskedArrayWriter<_> = MaskedArray::masked_with_value(samples_per_block, 0).into();
+					let mut data: MaskedArrayWriter<_> =
+						MaskedArray::masked_with_value(samples_per_block, 0).into();
 					data.copy_from_slice(&overhang[..]);
 					data
 				},
@@ -313,7 +345,7 @@ impl StreamBuffer for InMemoryBuffer {
 mod tests {
 	use super::*;
 
-	use chrono::{TimeZone, DurationRound};
+	use chrono::{DurationRound, TimeZone};
 
 	fn new_buffer() -> InMemoryBuffer {
 		InMemoryBuffer::new(Duration::minutes(1))
@@ -332,15 +364,15 @@ mod tests {
 		let t0 = epoch().duration_trunc(period).unwrap() + period * seq0 as i32;
 		let mut data = Vec::with_capacity(nsamples as usize);
 		data.resize(nsamples as usize, 2342i16);
-		metric::StreamBlock{
+		metric::StreamBlock {
 			t0,
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				instance: "0".into(),
 				device_type: "test_device".into(),
 			},
 			seq0,
 			period: period.to_std().unwrap(),
-			scale: metric::Value{
+			scale: metric::Value {
 				magnitude: 1.0,
 				unit: metric::Unit::Arbitrary,
 			},
@@ -381,7 +413,7 @@ mod tests {
 		println!("{:?}", buf);
 		match buf.read_next() {
 			Some(v) => {
-				assert_eq!(v.seq0, 65535-119);
+				assert_eq!(v.seq0, 65535 - 119);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 30, 0));
 				assert_eq!(v.data.len(), 600);
 				match *v.data {
@@ -401,11 +433,11 @@ mod tests {
 								panic!("sample {} is incorrect: {:?} != {}", i, v, 0)
 							}
 						}
-					},
+					}
 					#[allow(unreachable_patterns)]
 					ref other => panic!("unexpected raw data: {:?}", other),
 				}
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		};
 	}
@@ -431,7 +463,7 @@ mod tests {
 		println!("{:?}", buf);
 		match buf.read_next() {
 			Some(v) => {
-				assert_eq!(v.seq0, 65535-119);
+				assert_eq!(v.seq0, 65535 - 119);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 30, 0));
 				assert_eq!(v.data.len(), 600);
 				match *v.data {
@@ -451,11 +483,11 @@ mod tests {
 								panic!("sample {} is incorrect: {:?} != {}", i, v, 0)
 							}
 						}
-					},
+					}
 					#[allow(unreachable_patterns)]
 					ref other => panic!("unexpected raw data: {:?}", other),
 				}
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		};
 	}
@@ -472,7 +504,7 @@ mod tests {
 		println!("{:?}", buf);
 		match buf.read_next() {
 			Some(v) => {
-				assert_eq!(v.seq0, 65535-119);
+				assert_eq!(v.seq0, 65535 - 119);
 				assert_eq!(v.t0, Utc.ymd(2021, 8, 5).and_hms(7, 30, 0));
 				assert_eq!(v.data.len(), 600);
 				match *v.data {
@@ -487,11 +519,11 @@ mod tests {
 								panic!("sample {} is incorrect: {:?} != {}", i, v, 2342)
 							}
 						}
-					},
+					}
 					#[allow(unreachable_patterns)]
 					ref other => panic!("unexpected raw data: {:?}", other),
 				}
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		};
 		match buf.write(&b2) {
@@ -521,11 +553,11 @@ mod tests {
 								panic!("sample {} is incorrect: {:?} != {}", i, v, 2342)
 							}
 						}
-					},
+					}
 					#[allow(unreachable_patterns)]
 					ref other => panic!("unexpected raw data: {:?}", other),
 				}
-			},
+			}
 			other => panic!("unexpected read result: {:?}", other),
 		};
 		assert!(buf.read_next().is_none());

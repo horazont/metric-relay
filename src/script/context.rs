@@ -12,7 +12,7 @@ pub trait Namespace {
 
 impl<K: Borrow<str> + Hash + Eq> Namespace for HashMap<K, f64> {
 	fn lookup<'x>(&self, name: &'x str) -> Option<f64> {
-		self.get(name).and_then(|v| { Some(*v) })
+		self.get(name).and_then(|v| Some(*v))
 	}
 }
 
@@ -56,13 +56,13 @@ pub struct Context<'x> {
 
 impl<'x> Context<'x> {
 	pub fn empty() -> Context<'static> {
-		Context{
+		Context {
 			ns: BoxCow::Owned(Box::new(HashMap::<&'static str, f64>::new())),
 		}
 	}
 
 	pub fn new<T: Into<BoxCow<'x, (dyn Namespace + 'x)>>>(ns: T) -> Self {
-		Self{ns: ns.into()}
+		Self { ns: ns.into() }
 	}
 
 	pub fn lookup<T: Borrow<str>>(&self, name: T) -> Option<f64> {

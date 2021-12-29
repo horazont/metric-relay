@@ -41,17 +41,19 @@ impl<K, V> OrderedVec<K, V> {
 
 	#[inline]
 	fn find<Q: ?Sized>(&self, k: &Q) -> Result<usize, usize>
-		where
-			K: Borrow<Q>,
-			Q: Ord
+	where
+		K: Borrow<Q>,
+		Q: Ord,
 	{
-		self.0.binary_search_by(|kv: &(K, V)| { Ord::cmp(kv.0.borrow(), &k) })
+		self.0
+			.binary_search_by(|kv: &(K, V)| Ord::cmp(kv.0.borrow(), &k))
 	}
 
 	pub fn insert(&mut self, k: K, mut v: V) -> Option<V>
-		where K: Ord
+	where
+		K: Ord,
 	{
-		match self.0.binary_search_by(|kv: &(K, V)| { Ord::cmp(&kv.0, &k) }) {
+		match self.0.binary_search_by(|kv: &(K, V)| Ord::cmp(&kv.0, &k)) {
 			Ok(existing) => {
 				std::mem::swap(&mut v, &mut self.0[existing].1);
 				Some(v)
@@ -59,14 +61,14 @@ impl<K, V> OrderedVec<K, V> {
 			Err(target) => {
 				self.0.insert(target, (k, v));
 				None
-			},
+			}
 		}
 	}
 
 	pub fn get<Q: ?Sized>(&self, k: &Q) -> Option<&V>
-		where
-			K: Borrow<Q>,
-			Q: Ord
+	where
+		K: Borrow<Q>,
+		Q: Ord,
 	{
 		match self.find(k) {
 			Ok(existing) => Some(&self.0[existing].1),
@@ -75,9 +77,9 @@ impl<K, V> OrderedVec<K, V> {
 	}
 
 	pub fn get_mut<Q: ?Sized>(&mut self, k: &Q) -> Option<&mut V>
-		where
-			K: Borrow<Q>,
-			Q: Ord
+	where
+		K: Borrow<Q>,
+		Q: Ord,
 	{
 		match self.find(k) {
 			Ok(existing) => Some(&mut self.0[existing].1),
@@ -86,9 +88,9 @@ impl<K, V> OrderedVec<K, V> {
 	}
 
 	pub fn contains_key<Q: ?Sized>(&self, k: &Q) -> bool
-		where
-			K: Borrow<Q>,
-			Q: Ord
+	where
+		K: Borrow<Q>,
+		Q: Ord,
 	{
 		match self.find(k) {
 			Ok(_) => true,
@@ -97,9 +99,9 @@ impl<K, V> OrderedVec<K, V> {
 	}
 
 	pub fn remove_entry<Q: ?Sized>(&mut self, k: &Q) -> Option<(K, V)>
-		where
-			K: Borrow<Q>,
-			Q: Ord
+	where
+		K: Borrow<Q>,
+		Q: Ord,
 	{
 		match self.find(k) {
 			Ok(existing) => Some(self.0.remove(existing)),
@@ -108,11 +110,11 @@ impl<K, V> OrderedVec<K, V> {
 	}
 
 	pub fn remove<Q: ?Sized>(&mut self, k: &Q) -> Option<V>
-		where
-			K: Borrow<Q>,
-			Q: Ord
+	where
+		K: Borrow<Q>,
+		Q: Ord,
 	{
-		self.remove_entry(k).and_then(|kv| { Some(kv.1) })
+		self.remove_entry(k).and_then(|kv| Some(kv.1))
 	}
 
 	pub fn len(&self) -> usize {

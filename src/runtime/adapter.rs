@@ -4,17 +4,16 @@ use std::fmt;
 use std::sync::Arc;
 
 #[allow(unused_imports)]
-use log::{warn, debug, trace};
+use log::{debug, trace, warn};
 
-use tokio::sync::mpsc;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 #[cfg(feature = "debug")]
 use crate::stream;
 
 #[cfg(feature = "debug")]
 use super::payload;
-
 
 pub struct Serializer<T: 'static + Clone + Send> {
 	sink: mpsc::Sender<T>,
@@ -23,7 +22,7 @@ pub struct Serializer<T: 'static + Clone + Send> {
 impl<T: 'static + Clone + Send> Serializer<T> {
 	pub fn new(depth: usize) -> (Self, mpsc::Receiver<T>) {
 		let (sender, receiver) = mpsc::channel(depth);
-		(Self{sink: sender}, receiver)
+		(Self { sink: sender }, receiver)
 	}
 
 	pub fn attach(&self, mut src: broadcast::Receiver<T>) {
@@ -34,12 +33,12 @@ impl<T: 'static + Clone + Send> Serializer<T> {
 					// sending side closed, disconnect
 					Err(broadcast::error::RecvError::Closed) => {
 						debug!("serializer stream exiting because source got closed");
-						return
-					},
+						return;
+					}
 					Err(broadcast::error::RecvError::Lagged(nlost)) => {
 						warn!("serializer was too slow; lost {} items", nlost);
-						continue
-					},
+						continue;
+					}
 					Ok(item) => item,
 				};
 				match sink.send(item).await {
@@ -47,14 +46,13 @@ impl<T: 'static + Clone + Send> Serializer<T> {
 					// receiving side closed, disconnect
 					Err(_) => {
 						debug!("serializer stream exiting because destination got closed");
-						return
-					},
+						return;
+					}
 				}
 			}
 		});
 	}
 }
-
 
 #[cfg(feature = "debug")]
 #[derive(Debug)]
@@ -106,14 +104,26 @@ pub struct BufferedStream<T: stream::StreamBuffer + ?Sized> {
 #[cfg(feature = "debug")]
 impl<T: stream::StreamBuffer + ?Sized> BufferedStream<T> {
 	pub fn new(buffer: Box<T>, sink: broadcast::Sender<payload::Stream>) -> Self {
-		Self{buffer, sink}
+		Self { buffer, sink }
 	}
 
 	pub fn send(&mut self, block: payload::Stream) -> Result<(), BufferedStreamError> {
-		trace!("writing block to buffer: path={}  t0={}  seq0={}  len={}", block.path, block.t0, block.seq0, block.data.len());
+		trace!(
+			"writing block to buffer: path={}  t0={}  seq0={}  len={}",
+			block.path,
+			block.t0,
+			block.seq0,
+			block.data.len()
+		);
 		self.buffer.write(&block)?;
 		while let Some(block) = self.buffer.read_next() {
-			trace!("emitting block from buffer: path={}  t0={}  seq0={}  len={}", block.path, block.t0, block.seq0, block.data.len());
+			trace!(
+				"emitting block from buffer: path={}  t0={}  seq0={}  len={}",
+				block.path,
+				block.t0,
+				block.seq0,
+				block.data.len()
+			);
 			self.sink.send(Arc::new(block))?;
 		}
 		Ok(())

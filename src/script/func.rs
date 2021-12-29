@@ -5,7 +5,6 @@ use super::result;
 
 use crate::meteo;
 
-
 pub struct F2Op<T: Fn(f64, f64) -> result::EvalResult<f64> + Send + Sync> {
 	pub p1: Box<dyn context::Evaluate>,
 	pub p2: Box<dyn context::Evaluate>,
@@ -54,7 +53,6 @@ pub fn to_decibel(value: f64, limit: f64) -> result::EvalResult<f64> {
 	Ok((value.log10() * 10.0).max(limit))
 }
 
-
 #[derive(Debug)]
 pub struct BarometricCorrectionOp {
 	pub pressure: Box<dyn context::Evaluate>,
@@ -66,7 +64,11 @@ pub struct BarometricCorrectionOp {
 
 impl fmt::Display for BarometricCorrectionOp {
 	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} {} {} {} {} !barometric_correction", self.pressure, self.temperature, self.humidity, self.g_0, self.height)
+		write!(
+			f,
+			"{} {} {} {} {} !barometric_correction",
+			self.pressure, self.temperature, self.humidity, self.g_0, self.height
+		)
 	}
 }
 

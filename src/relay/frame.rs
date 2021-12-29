@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use log::trace;
 
-use bytes::{Buf, BytesMut, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -12,9 +12,9 @@ use bincode;
 use bincode::Options;
 
 use serde;
-use serde::{Deserializer, Serializer};
-use serde::ser::SerializeSeq;
 use serde::de::{SeqAccess, Visitor};
+use serde::ser::SerializeSeq;
+use serde::{Deserializer, Serializer};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::metric;
@@ -41,16 +41,18 @@ impl<'de> Visitor<'de> for ReadoutsVisitor {
 }
 
 impl<'de> serde::Deserialize<'de> for ReadoutWrap {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: Deserializer<'de>
-    {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
 		deserializer.deserialize_seq(ReadoutsVisitor())
-    }
+	}
 }
 
 impl serde::Serialize for ReadoutWrap {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-		where S: Serializer
+	where
+		S: Serializer,
 	{
 		let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
 		for readout in self.0.iter() {
@@ -90,11 +92,11 @@ pub type ClientId = u128;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Frame {
-	ClientHello{
+	ClientHello {
 		// chosen at startup by the client, once, randomly.
 		client_id: ClientId,
 	},
-	ServerHello{
+	ServerHello {
 		// sequence number of the last received data frame, if and only if the
 		// server has seen the client before and its session has not expired.
 		last_received: Option<u64>,
@@ -103,7 +105,7 @@ pub enum Frame {
 	Pong,
 	Data(DataFrame),
 	RequestAck,
-	Ack{
+	Ack {
 		last_received: u64,
 	},
 }
@@ -116,12 +118,9 @@ impl Decoder for FrameCodec {
 	type Item = Frame;
 	type Error = std::io::Error;
 
-	fn decode(
-		&mut self,
-		src: &mut BytesMut
-	) -> Result<Option<Self::Item>, Self::Error> {
+	fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
 		if src.len() < 4 {
-			return Ok(None)
+			return Ok(None);
 		}
 
 		let mut length_bytes = [0u8; 4];
@@ -130,25 +129,26 @@ impl Decoder for FrameCodec {
 		if length > MAX_FRAME_SIZE {
 			return Err(std::io::Error::new(
 				std::io::ErrorKind::InvalidData,
-				format!("frame size {} exceeds maximum frame size {}", length, MAX_FRAME_SIZE),
+				format!(
+					"frame size {} exceeds maximum frame size {}",
+					length, MAX_FRAME_SIZE
+				),
 			));
 		}
 
 		if src.len() < 4 + length {
 			// need more data
 			src.reserve(4 + length - src.len());
-			return Ok(None)
+			return Ok(None);
 		}
 
 		let frame = match bincode::DefaultOptions::new()
 			.with_little_endian()
 			.with_limit(MAX_FRAME_SIZE as u64)
-			.deserialize(&src[4..4+length]) {
+			.deserialize(&src[4..4 + length])
+		{
 			Ok(f) => f,
-			Err(e) => return Err(std::io::Error::new(
-				std::io::ErrorKind::InvalidData,
-				e,
-			)),
+			Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
 		};
 		src.advance(4 + length);
 		trace!("decoded frame: {:?}", frame);
@@ -165,17 +165,17 @@ impl Encoder<&Frame> for FrameCodec {
 			.with_limit(MAX_FRAME_SIZE as u64);
 
 		let len = match config.serialized_size(&item) {
-			Err(e) => return Err(std::io::Error::new(
-				std::io::ErrorKind::InvalidInput,
-				e,
-			)),
+			Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, e)),
 			Ok(l) => l,
 		};
 		if len > MAX_FRAME_SIZE as u64 {
 			return Err(std::io::Error::new(
 				std::io::ErrorKind::InvalidInput,
-				format!("data size {} would exceed maximum frame size {}", len, MAX_FRAME_SIZE),
-			))
+				format!(
+					"data size {} would exceed maximum frame size {}",
+					len, MAX_FRAME_SIZE
+				),
+			));
 		}
 
 		dst.reserve(len as usize + 4);
@@ -186,10 +186,7 @@ impl Encoder<&Frame> for FrameCodec {
 		match config.serialize_into(dst.writer(), &item) {
 			Err(e) => match *e {
 				bincode::ErrorKind::Io(ioe) => Err(ioe),
-				other => Err(std::io::Error::new(
-					std::io::ErrorKind::InvalidInput,
-					other,
-				)),
+				other => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, other)),
 			},
 			Ok(()) => Ok(()),
 		}
@@ -199,10 +196,10 @@ impl Encoder<&Frame> for FrameCodec {
 #[cfg(test)]
 mod test_codec {
 	use super::*;
-	use tokio::net::UnixStream;
-	use tokio_util::codec::Framed;
 	use futures::sink::SinkExt;
 	use futures::stream::StreamExt;
+	use tokio::net::UnixStream;
+	use tokio_util::codec::Framed;
 
 	#[tokio::test]
 	async fn test_codec() {
@@ -212,30 +209,30 @@ mod test_codec {
 
 		{
 			let test_client_id = 0xdeadbeeff00ba42342;
-			let test_send = Frame::ClientHello{
+			let test_send = Frame::ClientHello {
 				client_id: test_client_id,
 			};
 			ep1.send(&test_send).await.unwrap();
 			let test_recv = ep2.next().await.unwrap().unwrap();
 			match test_recv {
-				Frame::ClientHello{client_id} => {
+				Frame::ClientHello { client_id } => {
 					assert_eq!(client_id, test_client_id);
-				},
+				}
 				other => panic!("unexpected frame: {:?}", other),
 			}
 		}
 
 		{
 			let test_last_received = 0x2342;
-			let test_send = Frame::ServerHello{
+			let test_send = Frame::ServerHello {
 				last_received: Some(test_last_received),
 			};
 			ep2.send(&test_send).await.unwrap();
 			let test_recv = ep1.next().await.unwrap().unwrap();
 			match test_recv {
-				Frame::ServerHello{last_received} => {
+				Frame::ServerHello { last_received } => {
 					assert_eq!(last_received, Some(test_last_received));
-				},
+				}
 				other => panic!("unexpected frame: {:?}", other),
 			}
 		}

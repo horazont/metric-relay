@@ -3,41 +3,43 @@ use std::sync::Arc;
 
 use log::trace;
 
-use reqwest;
 use base64;
-use bytes::{BytesMut, BufMut};
+use bytes::{BufMut, BytesMut};
+use reqwest;
 
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::{Deserialize, Serialize};
 
-mod readout;
 mod filter;
+mod readout;
 
-pub use readout::{Precision, Readout};
-pub use filter::{Transpose, Select, Filter};
 #[cfg(feature = "regex")]
 pub use filter::TagToField;
-
+pub use filter::{Filter, Select, Transpose};
+pub use readout::{Precision, Readout};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Auth {
 	None,
-	HTTP{username: String, password: String},
-	Query{username: String, password: String},
+	HTTP { username: String, password: String },
+	Query { username: String, password: String },
 }
 
 impl Auth {
 	pub fn apply(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 		match self {
 			Self::None => req,
-			Self::HTTP{username, password} => req.header("Authorization", format!("Basic {}", base64::encode(format!(
-				"{}:{}", username, password,
-			)))),
-			Self::Query{username, password} => req.query(&[("u", username), ("p", password)]),
+			Self::HTTP { username, password } => req.header(
+				"Authorization",
+				format!(
+					"Basic {}",
+					base64::encode(format!("{}:{}", username, password,))
+				),
+			),
+			Self::Query { username, password } => req.query(&[("u", username), ("p", password)]),
 		}
 	}
 }
-
 
 pub enum Error {
 	Request(reqwest::Error),
@@ -73,7 +75,7 @@ pub struct Client {
 
 impl Client {
 	pub fn new(api_url: String, auth: Auth) -> Self {
-		Self{
+		Self {
 			client: reqwest::Client::new(),
 			write_url: format!("{}/write", api_url),
 			auth,
@@ -81,20 +83,16 @@ impl Client {
 	}
 
 	pub async fn post(
-			&self,
-			database: &'_ str,
-			retention_policy: Option<&'_ str>,
-			auth: Option<&'_ Auth>,
-			precision: Precision,
-			readouts: &[Arc<Readout>],
-			) -> Result<(), Error>
-	{
+		&self,
+		database: &'_ str,
+		retention_policy: Option<&'_ str>,
+		auth: Option<&'_ Auth>,
+		precision: Precision,
+		readouts: &[Arc<Readout>],
+	) -> Result<(), Error> {
 		let req = self.client.post(self.write_url.clone());
-		let req = auth.unwrap_or_else(|| { &self.auth }).apply(req);
-		let req = req.query(&[
-			("db", database),
-			("precision", precision.value()),
-		]);
+		let req = auth.unwrap_or_else(|| &self.auth).apply(req);
+		let req = req.query(&[("db", database), ("precision", precision.value())]);
 		let req = match retention_policy {
 			Some(policy) => req.query(&[("rp", policy)]),
 			None => req,
@@ -107,7 +105,7 @@ impl Client {
 			if precision != readout.precision {
 				panic!("inconsistent precisions in readouts!")
 			}
-			readout.write(&mut body_writer).unwrap();  // BytesMut is infallible
+			readout.write(&mut body_writer).unwrap(); // BytesMut is infallible
 		}
 
 		let body = body_writer.into_inner();
@@ -119,8 +117,12 @@ impl Client {
 				_ => Err(Error::UnexpectedSuccessStatus),
 			},
 			Err(e) => match e.status().unwrap() {
-				reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => Err(Error::PermissionError),
-				reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::PAYLOAD_TOO_LARGE => Err(Error::DataError),
+				reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
+					Err(Error::PermissionError)
+				}
+				reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::PAYLOAD_TOO_LARGE => {
+					Err(Error::DataError)
+				}
 				reqwest::StatusCode::NOT_FOUND => Err(Error::DatabaseNotFound),
 				_ => Err(Error::Request(e)),
 			},

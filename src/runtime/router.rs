@@ -5,11 +5,10 @@ use log::{trace, warn};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use super::payload;
 use super::adapter::Serializer;
-use super::traits::{Source, Sink};
 use super::filter::Filter;
-
+use super::payload;
+use super::traits::{Sink, Source};
 
 struct RouterWorker {
 	filters: Vec<Box<dyn Filter>>,
@@ -22,10 +21,10 @@ fn process_readouts(filters: &Vec<Box<dyn Filter>>, readouts: &mut payload::Samp
 			Some(new) => {
 				readouts[i] = new;
 				i += 1;
-			},
+			}
 			None => {
 				readouts.remove(i);
-			},
+			}
 		};
 	}
 }
@@ -36,11 +35,9 @@ impl RouterWorker {
 		sample_source: mpsc::Receiver<payload::Sample>,
 		stream_source: mpsc::Receiver<payload::Stream>,
 		sample_sink: broadcast::Sender<payload::Sample>,
-		stream_sink: broadcast::Sender<payload::Stream>)
-	{
-		let sample_worker = Arc::new(RouterWorker{
-			filters,
-		});
+		stream_sink: broadcast::Sender<payload::Stream>,
+	) {
+		let sample_worker = Arc::new(RouterWorker { filters });
 		let stream_worker = sample_worker.clone();
 		tokio::spawn(async move {
 			sample_worker.run_samples(sample_source, sample_sink).await;
@@ -51,9 +48,10 @@ impl RouterWorker {
 	}
 
 	async fn run_samples(
-			&self,
-			mut source: mpsc::Receiver<payload::Sample>,
-			sink: broadcast::Sender<payload::Sample>) {
+		&self,
+		mut source: mpsc::Receiver<payload::Sample>,
+		sink: broadcast::Sender<payload::Sample>,
+	) {
 		loop {
 			let mut readouts = match source.recv().await {
 				Some(item) => item,
@@ -81,9 +79,10 @@ impl RouterWorker {
 	}
 
 	async fn run_streams(
-			&self,
-			mut source: mpsc::Receiver<payload::Stream>,
-			sink: broadcast::Sender<payload::Stream>) {
+		&self,
+		mut source: mpsc::Receiver<payload::Stream>,
+		sink: broadcast::Sender<payload::Stream>,
+	) {
 		loop {
 			let mut item = match source.recv().await {
 				Some(item) => item,
@@ -95,7 +94,7 @@ impl RouterWorker {
 				None => {
 					trace!("stream got dropped by filter");
 					continue;
-				},
+				}
 			};
 			match sink.send(item) {
 				Ok(_) => (),
@@ -128,7 +127,7 @@ impl Router {
 			sample_zygote.clone(),
 			stream_zygote.clone(),
 		);
-		Self{
+		Self {
 			samples,
 			streams,
 			sample_zygote,

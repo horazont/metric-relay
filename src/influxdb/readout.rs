@@ -1,15 +1,14 @@
 use std::io;
 
-use smartstring::alias::{String as SmartString};
+use smartstring::alias::String as SmartString;
 
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::{Deserialize, Serialize};
 
-use enum_map::{Enum};
+use enum_map::Enum;
 
 use chrono::{DateTime, Utc};
 
 use crate::metric;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
 pub enum Precision {
@@ -35,35 +34,22 @@ impl Precision {
 			Self::Seconds => write!(w, "{}", ts.timestamp()),
 			Self::Milliseconds => {
 				let ms = ts.timestamp_subsec_millis();
-				let ms = if ms >= 999 {
-					999
-				} else {
-					ms
-				};
+				let ms = if ms >= 999 { 999 } else { ms };
 				write!(w, "{}{:03}", ts.timestamp(), ms)
-			},
+			}
 			Self::Microseconds => {
 				let us = ts.timestamp_subsec_micros();
-				let us = if us >= 999_999 {
-					999_999
-				} else {
-					us
-				};
+				let us = if us >= 999_999 { 999_999 } else { us };
 				write!(w, "{}{:06}", ts.timestamp(), us)
-			},
+			}
 			Self::Nanoseconds => {
 				let ns = ts.timestamp_subsec_nanos();
-				let ns = if ns >= 999_999_999 {
-					999_999_999
-				} else {
-					ns
-				};
+				let ns = if ns >= 999_999_999 { 999_999_999 } else { ns };
 				write!(w, "{}{:09}", ts.timestamp(), ns)
-			},
+			}
 		}
 	}
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Sample {
@@ -91,11 +77,11 @@ impl Readout {
 			fieldv.push(v.magnitude);
 		}
 
-		let samples = vec![Sample{
+		let samples = vec![Sample {
 			tagv: vec![readout.path.instance.clone()],
 			fieldv: fieldv,
 		}];
-		Readout{
+		Readout {
 			ts: readout.timestamp,
 			measurement: readout.path.device_type.clone(),
 			precision,

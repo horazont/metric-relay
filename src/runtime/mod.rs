@@ -1,34 +1,34 @@
 use std::collections::HashMap;
 
-mod payload;
-mod traits;
-mod config;
-#[cfg(feature = "sbx")]
-mod sbx;
 mod adapter;
+mod config;
 #[cfg(feature = "debug")]
 mod debug;
+#[cfg(feature = "detrend")]
+mod detrend;
+#[cfg(feature = "fft")]
+mod fft;
 mod filter;
+#[cfg(feature = "influxdb")]
+mod influxdb;
+mod payload;
+#[cfg(feature = "pubsub")]
+mod pubsub;
 #[cfg(feature = "relay")]
 mod relay;
 mod router;
-#[cfg(feature = "influxdb")]
-mod influxdb;
-#[cfg(feature = "pubsub")]
-mod pubsub;
-#[cfg(feature = "fft")]
-mod fft;
-#[cfg(feature = "summary")]
-mod summary;
+#[cfg(feature = "sbx")]
+mod sbx;
 #[cfg(feature = "smbus")]
 mod smbus;
 #[cfg(feature = "stream-filearchive")]
 mod stream;
-#[cfg(feature = "detrend")]
-mod detrend;
+#[cfg(feature = "summary")]
+mod summary;
+mod traits;
 
-pub use traits::{Source, Sink, Node};
-pub use config::{Config, BuildError};
+pub use config::{BuildError, Config};
+pub use traits::{Node, Sink, Source};
 
 pub struct Runtime {
 	#[allow(dead_code)]
@@ -36,31 +36,29 @@ pub struct Runtime {
 }
 
 impl Config {
-	fn get_source<'x>(nodes: &'x HashMap<String, Node>, name: &'_ str) -> Result<&'x dyn Source, BuildError> {
+	fn get_source<'x>(
+		nodes: &'x HashMap<String, Node>,
+		name: &'_ str,
+	) -> Result<&'x dyn Source, BuildError> {
 		match nodes.get(name) {
-			None => Err(BuildError::UndefinedSource{
-				which: name.into(),
-			}),
+			None => Err(BuildError::UndefinedSource { which: name.into() }),
 			Some(node) => match node.as_source() {
-				None => Err(BuildError::NotASource{
-					which: name.into(),
-				}),
+				None => Err(BuildError::NotASource { which: name.into() }),
 				Some(src) => Ok(src),
-			}
+			},
 		}
 	}
 
-	fn get_sink<'x>(nodes: &'x HashMap<String, Node>, name: &'_ str) -> Result<&'x dyn Sink, BuildError> {
+	fn get_sink<'x>(
+		nodes: &'x HashMap<String, Node>,
+		name: &'_ str,
+	) -> Result<&'x dyn Sink, BuildError> {
 		match nodes.get(name) {
-			None => Err(BuildError::UndefinedSink{
-				which: name.into(),
-			}),
+			None => Err(BuildError::UndefinedSink { which: name.into() }),
 			Some(node) => match node.as_sink() {
-				None => Err(BuildError::NotASink{
-					which: name.into(),
-				}),
+				None => Err(BuildError::NotASink { which: name.into() }),
 				Some(src) => Ok(src),
-			}
+			},
 		}
 	}
 
@@ -76,9 +74,7 @@ impl Config {
 			sink.attach_source(src);
 		}
 
-		Ok(Runtime{
-			nodes,
-		})
+		Ok(Runtime { nodes })
 
 		/* let mut sources: HashMap<String, Box<dyn Source>> = HashMap::new();
 		let mut sinks = HashMap::new();

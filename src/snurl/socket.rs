@@ -1,16 +1,19 @@
+use std::fmt;
 use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
-use std::fmt;
 
-use tokio::net::{UdpSocket, ToSocketAddrs};
 use tokio::io::Result as IoResult;
+use tokio::net::{ToSocketAddrs, UdpSocket};
 
-use bytes::{Bytes, BytesMut, Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use getrandom;
 
-use super::frame::{RawPacketType, RawCommonHeader, AppRequest, AppResponse, ConnectionId, PROTOCOL_VERSION, RawDataFrameHeader};
+use super::frame::{
+	AppRequest, AppResponse, ConnectionId, RawCommonHeader, RawDataFrameHeader, RawPacketType,
+	PROTOCOL_VERSION,
+};
 use super::recvqueue::RecvQueue;
 use super::sendqueue::SendQueue;
 use crate::serial::SerialNumber;
@@ -60,7 +63,7 @@ enum PacketResult {
 #[derive(Debug, Clone, Copy)]
 enum HandshakeResult {
 	Synchronized,
-	Resynchronized{ lowest_sn: SerialNumber },
+	Resynchronized { lowest_sn: SerialNumber },
 	PacketsRequired,
 }
 
@@ -79,7 +82,7 @@ struct SharedState {
 
 impl SharedState {
 	fn new(initial_peer_addr: SocketAddr) -> SharedState {
-		SharedState{
+		SharedState {
 			last_recvd_sn: AtomicU16::new(65535u16),
 			max_recvd_sn: AtomicU16::new(65535u16),
 			min_avail_sn: AtomicU16::new(0u16),
@@ -97,7 +100,12 @@ impl SharedState {
 		// otherwise, we could end up in the situation that we emit a packet
 		// with one ID and then a packet with another ID during handshaking,
 		// breaking convergence.
-		match self.connection_id.compare_exchange(0, new_conn_id, Ordering::AcqRel, Ordering::Acquire) {
+		match self.connection_id.compare_exchange(
+			0,
+			new_conn_id,
+			Ordering::AcqRel,
+			Ordering::Acquire,
+		) {
 			// we won the race -> return our value
 			Ok(_) => new_conn_id,
 			// another thread won the race -> return their ID
@@ -112,14 +120,21 @@ impl SharedState {
 
 	#[inline]
 	fn change_connection_id(&self, old_conn_id: ConnectionId, new_conn_id: ConnectionId) -> bool {
-		self.connection_id.compare_exchange(old_conn_id, new_conn_id, Ordering::AcqRel, Ordering::Acquire).is_ok()
+		self.connection_id
+			.compare_exchange(
+				old_conn_id,
+				new_conn_id,
+				Ordering::AcqRel,
+				Ordering::Acquire,
+			)
+			.is_ok()
 	}
 
 	fn compose_header(&self, type_: RawPacketType) -> RawCommonHeader {
 		let min_avail_sn = self.min_avail_sn.load(Ordering::Acquire).into();
 		let last_recvd_sn = self.last_recvd_sn.load(Ordering::Acquire).into();
 		let max_recvd_sn = self.max_recvd_sn.load(Ordering::Acquire).into();
-		RawCommonHeader{
+		RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_,
 			connection_id: self.connection_id.load(Ordering::Acquire),
@@ -130,17 +145,22 @@ impl SharedState {
 	}
 
 	fn set_rx_sns(&self, max_recvd_sn: SerialNumber, last_recvd_sn: SerialNumber) {
-		self.max_recvd_sn.store(max_recvd_sn.into(), Ordering::Release);
-		self.last_recvd_sn.store(last_recvd_sn.into(), Ordering::Release);
+		self.max_recvd_sn
+			.store(max_recvd_sn.into(), Ordering::Release);
+		self.last_recvd_sn
+			.store(last_recvd_sn.into(), Ordering::Release);
 	}
 
 	fn set_remote_rx_sns(&self, max_recvd_sn: SerialNumber, last_recvd_sn: SerialNumber) {
-		self.remote_max_recvd_sn.store(max_recvd_sn.into(), Ordering::Release);
-		self.remote_last_recvd_sn.store(last_recvd_sn.into(), Ordering::Release);
+		self.remote_max_recvd_sn
+			.store(max_recvd_sn.into(), Ordering::Release);
+		self.remote_last_recvd_sn
+			.store(last_recvd_sn.into(), Ordering::Release);
 	}
 
 	fn set_tx_sn(&self, min_avail_sn: SerialNumber) {
-		self.min_avail_sn.store(min_avail_sn.into(), Ordering::Release);
+		self.min_avail_sn
+			.store(min_avail_sn.into(), Ordering::Release);
 	}
 
 	fn remote_rx_sns(&self) -> (SerialNumber, SerialNumber) {
@@ -154,7 +174,7 @@ impl SharedState {
 		{
 			let guard = self.peer_address.read().unwrap();
 			if *guard == addr {
-				return
+				return;
 			}
 		}
 		{
@@ -191,7 +211,7 @@ impl fmt::Debug for Receiver {
 
 impl Receiver {
 	fn new(state: Arc<SharedState>, max_queue_size: usize) -> Receiver {
-		Receiver{
+		Receiver {
 			state,
 			buffer: None,
 			q: RecvQueue::new(max_queue_size, 0u16.into()),
@@ -248,12 +268,15 @@ impl Receiver {
 		let mut read_some = false;
 		loop {
 			if buf.remaining() == 0 {
-				break
+				break;
 			}
 			let frame_hdr = RawDataFrameHeader::read(buf)?;
 			let len = frame_hdr.len as usize;
 			if buf.remaining() < len {
-				return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes remaining for data payload"))
+				return Err(StdIoError::new(
+					StdIoErrorKind::UnexpectedEof,
+					"not enough bytes remaining for data payload",
+				));
 			}
 			let data = buf.copy_to_bytes(len);
 			self.q.set(frame_hdr.sn, data);
@@ -269,7 +292,12 @@ impl Receiver {
 	// Returns true if the synchronization was successful (either because it was pre-existing or could be done unilaterally) and false if more packets need to be transmitted and received for synchronization to happen.
 	//
 	// In the latter case, an Echo Request or Echo Response packet MUST be emitted in order to cause the necessary packet exchange.
-	fn handshake(&mut self, local_port: u16, remote_port: u16, hdr: &RawCommonHeader) -> HandshakeResult {
+	fn handshake(
+		&mut self,
+		local_port: u16,
+		remote_port: u16,
+		hdr: &RawCommonHeader,
+	) -> HandshakeResult {
 		let local_id = self.state.connection_id();
 		let remote_id = hdr.connection_id;
 		let am_tiebreaker = local_port < remote_port;
@@ -280,7 +308,9 @@ impl Receiver {
 				if self.half_synced {
 					// only now we got the "syn-ack", force a sync
 					self.half_synced = false;
-					HandshakeResult::Resynchronized{ lowest_sn: hdr.min_avail_sn }
+					HandshakeResult::Resynchronized {
+						lowest_sn: hdr.min_avail_sn,
+					}
 				} else {
 					// we know the peer, all good
 					HandshakeResult::Synchronized
@@ -295,7 +325,9 @@ impl Receiver {
 					// ugh, ID change did not work, retry on the next packet
 					HandshakeResult::PacketsRequired
 				} else {
-					HandshakeResult::Resynchronized{ lowest_sn: hdr.min_avail_sn }
+					HandshakeResult::Resynchronized {
+						lowest_sn: hdr.min_avail_sn,
+					}
 				}
 			}
 		} else if remote_id != 0 {
@@ -307,7 +339,9 @@ impl Receiver {
 				HandshakeResult::PacketsRequired
 			} else {
 				// we can sync right away
-				HandshakeResult::Resynchronized{ lowest_sn: hdr.min_avail_sn }
+				HandshakeResult::Resynchronized {
+					lowest_sn: hdr.min_avail_sn,
+				}
 			}
 		} else {
 			// nobody’s got any clue?
@@ -334,27 +368,38 @@ impl Receiver {
 	fn _resync(&mut self, lowest_sn: SerialNumber) {
 		self.pending.reserve(self.q.len() + 1);
 		self.pending.push(RecvItem::ResyncMarker);
-		self.pending.extend(self.q.flush(lowest_sn).drain(..).map(|x| { RecvItem::Data(x.into_payload())}));
+		self.pending.extend(
+			self.q
+				.flush(lowest_sn)
+				.drain(..)
+				.map(|x| RecvItem::Data(x.into_payload())),
+		);
 		self._update_sns()
 	}
 
-	fn process_packet<B: Buf>(&mut self, local_port: u16, remote_port: u16, buf: &mut B) -> IoResult<PacketResult> {
+	fn process_packet<B: Buf>(
+		&mut self,
+		local_port: u16,
+		remote_port: u16,
+		buf: &mut B,
+	) -> IoResult<PacketResult> {
 		let hdr = RawCommonHeader::read(buf)?;
 		match self.handshake(local_port, remote_port, &hdr) {
 			HandshakeResult::Synchronized => (),
 			HandshakeResult::PacketsRequired => {
 				// we need to send a packet and then wait for the reply -- so we pretend that this was an echo request :>
 				// TODO: send echo response instead of dack, but the python stuff won’t like it
-				return Ok(PacketResult::PacketReceived)
-			},
-			HandshakeResult::Resynchronized{ lowest_sn } => {
+				return Ok(PacketResult::PacketReceived);
+			}
+			HandshakeResult::Resynchronized { lowest_sn } => {
 				// but we can still proceed, the next receive call will just return data from the flush queue if any
 				self._resync(lowest_sn)
-			},
+			}
 		}
 
 		self.q.mark_unreceivable_up_to(hdr.min_avail_sn);
-		self.state.set_remote_rx_sns(hdr.max_recvd_sn, hdr.last_recvd_sn);
+		self.state
+			.set_remote_rx_sns(hdr.max_recvd_sn, hdr.last_recvd_sn);
 
 		match hdr.type_ {
 			RawPacketType::Data => {
@@ -365,21 +410,23 @@ impl Receiver {
 				} else {
 					Ok(PacketResult::Nop)
 				}
-			},
+			}
 			RawPacketType::DataAck => {
 				// TODO: handle DACK frames; the header based acking is already done here
 				Ok(PacketResult::Nop)
-			},
+			}
 			other => panic!("not implemented: {:?}", other),
 		}
 	}
 
 	fn try_read(&mut self) -> Option<RecvItem> {
 		if self.pending.len() > 0 {
-			return Some(self.pending.remove(0))
+			return Some(self.pending.remove(0));
 		}
 		self.pending.shrink_to_fit();
-		self.q.try_read().and_then(|x| { Some(RecvItem::Data(x.into_payload())) })
+		self.q
+			.try_read()
+			.and_then(|x| Some(RecvItem::Data(x.into_payload())))
 	}
 
 	fn _restore_buffer(&mut self) {
@@ -393,7 +440,7 @@ impl Receiver {
 		self._restore_buffer();
 		loop {
 			if let Some(data) = self.try_read() {
-				return Ok(data)
+				return Ok(data);
 			}
 
 			let mut swapspace: Option<Box<[u8; 65536]>> = None;
@@ -407,11 +454,11 @@ impl Receiver {
 					debug_assert!(swapspace.is_some());
 					std::mem::swap(&mut swapspace, &mut self.buffer);
 					return Err(e);
-				},
+				}
 			};
 			let remote_port = addr.port();
 			if remote_port == local_port {
-				continue
+				continue;
 			}
 			let mut buf = &buffer[..sz];
 			// IMPORTANT: do not use `?` *here*, because we did not swap the
@@ -427,12 +474,12 @@ impl Receiver {
 			match result? {
 				PacketResult::PacketReceived => {
 					self._send_ack(from, addr).await?;
-				},
+				}
 				PacketResult::EchoRequest => {
 					self._send_echo_response(from, addr).await?;
-				},
+				}
 				PacketResult::Nop => (),
-				other => panic!("not implementd: {:?}", other)
+				other => panic!("not implementd: {:?}", other),
 			}
 		}
 	}
@@ -446,14 +493,13 @@ struct Transmitter {
 
 impl fmt::Debug for Transmitter {
 	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
-		f.debug_struct("Transmitter")
-			.finish()
+		f.debug_struct("Transmitter").finish()
 	}
 }
 
 impl Transmitter {
 	fn new(state: Arc<SharedState>, max_queue_size: usize) -> Transmitter {
-		Transmitter{
+		Transmitter {
 			state,
 			q: SendQueue::new(max_queue_size, get_random_u16().into()),
 			mss: 1240,
@@ -477,7 +523,7 @@ impl Transmitter {
 		self.state.set_tx_sn(self.q.min_sn());
 
 		if self.q.len() == 0 {
-			return Ok(())
+			return Ok(());
 		}
 
 		let hdr = self.state.compose_header(RawPacketType::Data);
@@ -487,7 +533,7 @@ impl Transmitter {
 		let mut buf = &mut backing[..];
 		hdr.write(&mut buf)?;
 
-		let (newest_sn, ref newest_data) = self.q[self.q.len()-1];
+		let (newest_sn, ref newest_data) = self.q[self.q.len() - 1];
 		buf.put(newest_data.clone());
 
 		for (frame_sn, frame_data) in self.q.iter() {
@@ -529,7 +575,7 @@ pub struct Socket {
 impl Socket {
 	pub fn new(conn: UdpSocket, initial_peer_addr: SocketAddr) -> Socket {
 		let state = Arc::new(SharedState::new(initial_peer_addr));
-		Socket{
+		Socket {
 			state: state.clone(),
 			inner: conn,
 			receiver: Receiver::new(state.clone(), 256),
@@ -553,7 +599,10 @@ mod tests {
 	use std::net::IpAddr;
 
 	fn test_receiver() -> (Arc<SharedState>, Receiver) {
-		let state = Arc::new(SharedState::new(SocketAddr::new("0.0.0.0".parse::<IpAddr>().unwrap(), 7201u16)));
+		let state = Arc::new(SharedState::new(SocketAddr::new(
+			"0.0.0.0".parse::<IpAddr>().unwrap(),
+			7201u16,
+		)));
 		let r = Receiver::new(state.clone(), 16);
 		(state, r)
 	}
@@ -588,7 +637,7 @@ mod tests {
 	#[test]
 	fn test_handshake_both_zero_remote_tiebreaker() {
 		// first scenario: both peers have no connection ID set and the remote is the tiebreaker
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0,
@@ -599,15 +648,16 @@ mod tests {
 		let (state, mut receiver) = test_receiver();
 		let r = receiver.handshake(
 			// remote has the lower port number
-			2048,
-			1024,
-			&hdr,
+			2048, 1024, &hdr,
 		);
 		// that requires to emit a packet so that the remote learns that they
 		// have the higher port number.
 		match r {
 			HandshakeResult::PacketsRequired => (),
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0);
 	}
@@ -615,7 +665,7 @@ mod tests {
 	#[test]
 	fn test_handshake_both_zero_local_tiebreaker() {
 		// second scenario: both peers have no connection ID set, but we are the tiebreaker
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0,
@@ -626,19 +676,20 @@ mod tests {
 		let (state, mut receiver) = test_receiver();
 		let r = receiver.handshake(
 			// local has the lower port number
-			1024,
-			2048,
-			&hdr,
+			1024, 2048, &hdr,
 		);
 		// we have to roll a connection ID and choose it, but we still need to wait for the remote side to accept that before accepting data.
 		match r {
 			HandshakeResult::PacketsRequired => (),
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		let new_connection_id = state.connection_id();
 		assert_ne!(new_connection_id, 0);
 
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: new_connection_id,
@@ -648,18 +699,19 @@ mod tests {
 		};
 		let r = receiver.handshake(
 			// port numbers should not matter now because we have a connection ID
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 
 		// and now it is crucial that Resynchronized is emitted, otherwise unspeakable things will happen (because we did not properly sync the serial number)
 		// as a side, this guards against off-path injection somewhat
 		match r {
-			HandshakeResult::Resynchronized{ lowest_sn } => {
+			HandshakeResult::Resynchronized { lowest_sn } => {
 				assert_eq!(lowest_sn, 1234u16.into());
-			},
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			}
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), new_connection_id);
 	}
@@ -667,7 +719,7 @@ mod tests {
 	#[test]
 	fn test_handshake_both_zero_local_tiebreaker_finishes_sync() {
 		// first the remote opener
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0,
@@ -678,13 +730,11 @@ mod tests {
 		let (state, mut receiver) = test_receiver();
 		receiver.handshake(
 			// local has the lower port number
-			1024,
-			2048,
-			&hdr,
+			1024, 2048, &hdr,
 		);
 		let new_connection_id = state.connection_id();
 		// then the remote "SYN ACK"
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: new_connection_id,
@@ -694,12 +744,10 @@ mod tests {
 		};
 		receiver.handshake(
 			// port numbers should not matter now because we have a connection ID
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 		// and now some data -- this must now be "Synchronized"
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: new_connection_id,
@@ -709,13 +757,14 @@ mod tests {
 		};
 		let r = receiver.handshake(
 			// port numbers should not matter now because we have a connection ID
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 		match r {
 			HandshakeResult::Synchronized => (),
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), new_connection_id);
 	}
@@ -723,7 +772,7 @@ mod tests {
 	#[test]
 	fn test_handshake_local_zero() {
 		// third: remote has a connection ID, but we do not
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0x2342,
@@ -734,16 +783,17 @@ mod tests {
 		let (state, mut receiver) = test_receiver();
 		let r = receiver.handshake(
 			// port numbers don’t matter now, set them equal (forbidden!)
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 		match r {
 			// sync succeeds immediately
-			HandshakeResult::Resynchronized{ lowest_sn } => {
+			HandshakeResult::Resynchronized { lowest_sn } => {
 				assert_eq!(lowest_sn, 1234u16.into());
-			},
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			}
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0x2342);
 	}
@@ -751,7 +801,7 @@ mod tests {
 	#[test]
 	fn test_handshake_remote_zero() {
 		// fourth: remote has no connection ID, but we do
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0,
@@ -763,19 +813,20 @@ mod tests {
 		assert!(state.change_connection_id(0, 0x2342));
 		let r = receiver.handshake(
 			// port numbers don’t matter now, set them equal (forbidden!)
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 		match r {
 			// we need to send more packets to the remote in order for them to accept our ID
 			// we cannot accept data from the remote before that
 			HandshakeResult::PacketsRequired => (),
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0x2342);
 
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0x2342,
@@ -785,18 +836,19 @@ mod tests {
 		};
 		let r = receiver.handshake(
 			// port numbers should not matter now because we have a connection ID
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 
 		// and now it is crucial that Resynchronized is emitted, otherwise unspeakable things will happen (because we did not properly sync the serial number)
 		// as a side, this guards against off-path injection somewhat
 		match r {
-			HandshakeResult::Resynchronized{ lowest_sn } => {
+			HandshakeResult::Resynchronized { lowest_sn } => {
 				assert_eq!(lowest_sn, 1234u16.into());
-			},
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			}
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0x2342);
 	}
@@ -804,7 +856,7 @@ mod tests {
 	#[test]
 	fn test_handshake_both_nonzero_unequal_local_tiebreaker() {
 		// fifth: both have a connection ID and they do not match and we are the tiebreaker
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0xf00d,
@@ -814,19 +866,18 @@ mod tests {
 		};
 		let (state, mut receiver) = test_receiver();
 		assert!(state.change_connection_id(0, 0x2342));
-		let r = receiver.handshake(
-			1024,
-			2048,
-			&hdr,
-		);
+		let r = receiver.handshake(1024, 2048, &hdr);
 		match r {
 			// we resynchronize, but we also need to send more packets in order to inform the remote about what is going on. before that, we cannot accept any data, so we do not resync
 			HandshakeResult::PacketsRequired => (),
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0x2342);
 
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0x2342,
@@ -836,18 +887,19 @@ mod tests {
 		};
 		let r = receiver.handshake(
 			// port numbers should not matter now because we have a connection ID
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 
 		// and now it is crucial that Resynchronized is emitted, otherwise unspeakable things will happen (because we did not properly sync the serial number)
 		// as a side, this guards against off-path injection somewhat
 		match r {
-			HandshakeResult::Resynchronized{ lowest_sn } => {
+			HandshakeResult::Resynchronized { lowest_sn } => {
 				assert_eq!(lowest_sn, 1234u16.into());
-			},
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			}
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0x2342);
 	}
@@ -855,7 +907,7 @@ mod tests {
 	#[test]
 	fn test_handshake_both_nonzero_unequal_remote_tiebreaker() {
 		// sixth: both have a connection ID and they do not match but the remote is the tiebreaker
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0xf00d,
@@ -865,17 +917,16 @@ mod tests {
 		};
 		let (state, mut receiver) = test_receiver();
 		assert!(state.change_connection_id(0, 0x2342));
-		let r = receiver.handshake(
-			2048,
-			1024,
-			&hdr,
-		);
+		let r = receiver.handshake(2048, 1024, &hdr);
 		match r {
 			// we resynchronize based on the remote ID
-			HandshakeResult::Resynchronized{ lowest_sn } => {
+			HandshakeResult::Resynchronized { lowest_sn } => {
 				assert_eq!(lowest_sn, 1234u16.into());
-			},
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			}
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0xf00d);
 	}
@@ -883,7 +934,7 @@ mod tests {
 	#[test]
 	fn test_handshake_both_nonzero_and_equal() {
 		// seventh and finally: both have the same connection ID, everything is golden
-		let hdr = RawCommonHeader{
+		let hdr = RawCommonHeader {
 			version: PROTOCOL_VERSION,
 			type_: RawPacketType::Data,
 			connection_id: 0x2342,
@@ -895,13 +946,14 @@ mod tests {
 		assert!(state.change_connection_id(0, 0x2342));
 		let r = receiver.handshake(
 			// again do port numbers not matter
-			0,
-			0,
-			&hdr,
+			0, 0, &hdr,
 		);
 		match r {
 			HandshakeResult::Synchronized => (),
-			other => panic!("unexpected handshake result: {:?} on receiver {:x?} with {:x?}", other, receiver, hdr),
+			other => panic!(
+				"unexpected handshake result: {:?} on receiver {:x?} with {:x?}",
+				other, receiver, hdr
+			),
 		}
 		assert_eq!(state.connection_id(), 0x2342);
 	}

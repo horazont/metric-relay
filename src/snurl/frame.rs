@@ -1,9 +1,9 @@
-use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind};
 use std::convert::TryInto;
+use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind};
 
 use num_enum::TryFromPrimitive;
 
-use bytes::{Bytes, Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 
 use crate::serial::SerialNumber;
 
@@ -37,15 +37,24 @@ impl RawCommonHeader {
 	pub(crate) fn read<R: Buf>(r: &mut R) -> Result<RawCommonHeader, StdIoError> {
 		// size of raw header
 		if r.remaining() < 1 {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for version"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes left for version",
+			));
 		}
 		let version = r.get_u8();
 		if version != PROTOCOL_VERSION {
-			return Err(StdIoError::new(StdIoErrorKind::InvalidData, "unsupported version"));
+			return Err(StdIoError::new(
+				StdIoErrorKind::InvalidData,
+				"unsupported version",
+			));
 		}
 
 		if r.remaining() < 11 {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for common header"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes left for common header",
+			));
 		}
 
 		let type_: RawPacketType = match r.get_u8().try_into() {
@@ -56,9 +65,9 @@ impl RawCommonHeader {
 		let connection_id = r.get_u32_le();
 		let min_avail_sn = r.get_u16_le().into();
 		let max_recvd_sn = r.get_u16_le().into();
-		let last_recvd_sn  = r.get_u16_le().into();
+		let last_recvd_sn = r.get_u16_le().into();
 
-		Ok(RawCommonHeader{
+		Ok(RawCommonHeader {
 			version,
 			type_,
 			connection_id,
@@ -70,7 +79,10 @@ impl RawCommonHeader {
 
 	pub(crate) fn write<W: BufMut>(&self, w: &mut W) -> Result<(), StdIoError> {
 		if w.remaining_mut() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for common header"));
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes left for common header",
+			));
 		}
 
 		w.put_u8(self.version);
@@ -94,20 +106,23 @@ impl RawDataFrameHeader {
 
 	pub(crate) fn read<R: Buf>(r: &mut R) -> Result<RawDataFrameHeader, StdIoError> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame header"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes left for data frame header",
+			));
 		}
 
 		let sn = r.get_u16_le().into();
 		let len = r.get_u8();
-		Ok(RawDataFrameHeader{
-			sn: sn,
-			len: len,
-		})
+		Ok(RawDataFrameHeader { sn: sn, len: len })
 	}
 
 	fn write<W: BufMut>(&self, w: &mut W) -> Result<(), StdIoError> {
 		if w.remaining_mut() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame header"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes left for data frame header",
+			));
 		}
 
 		w.put_u16_le(self.sn.into());
@@ -136,14 +151,20 @@ impl DataFrame {
 	pub(crate) fn write<W: BufMut>(&self, w: &mut W) -> Result<(), StdIoError> {
 		let len = self.payload.len();
 		if len > 255 {
-			return Err(StdIoError::new(StdIoErrorKind::InvalidInput, "payload too large"));
+			return Err(StdIoError::new(
+				StdIoErrorKind::InvalidInput,
+				"payload too large",
+			));
 		}
-		let hdr = RawDataFrameHeader{
+		let hdr = RawDataFrameHeader {
 			sn: self.sn,
 			len: len as u8,
 		};
 		if w.remaining_mut() < RawDataFrameHeader::RAW_LEN + len {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes left for data frame"));
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes left for data frame",
+			));
 		}
 		hdr.write(w)?;
 		let mut buf = self.payload.clone();

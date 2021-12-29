@@ -1,14 +1,14 @@
 use std::fmt::Write;
 
-use smartstring::alias::{String as SmartString};
+use smartstring::alias::String as SmartString;
 
-use crate::metric;
 use crate::bme280;
 use crate::bme280::{
-	TEMPERATURE_COMPONENT as BME280_TEMP_COMPONENT,
-	PRESSURE_COMPONENT as BME280_PRESSURE_COMPONENT,
 	HUMIDITY_COMPONENT as BME280_HUMIDITY_COMPONENT,
+	PRESSURE_COMPONENT as BME280_PRESSURE_COMPONENT,
+	TEMPERATURE_COMPONENT as BME280_TEMP_COMPONENT,
 };
+use crate::metric;
 
 use super::frame;
 use super::rtcifier;
@@ -65,7 +65,7 @@ pub struct DS18B20Readouts<'x, T: rtcifier::RTCifier> {
 
 impl<'x, T: rtcifier::RTCifier> DS18B20Readouts<'x, T> {
 	fn from_msg(msg: &'x frame::SbxDS18B20Message, rtcifier: &'x mut T) -> Self {
-		Self{
+		Self {
 			rtc: rtcifier,
 			src: msg,
 			at: 0,
@@ -79,24 +79,27 @@ impl<'x, T: rtcifier::RTCifier> Iterator for DS18B20Readouts<'x, T> {
 	fn next(&mut self) -> Option<Self::Item> {
 		let samples = &self.src.samples;
 		if self.at >= samples.len() {
-			return None
+			return None;
 		}
 
 		let sample = &samples[self.at];
 		self.at += 1;
 		let mut components = metric::OrderedVec::new();
-		components.insert(DS18B20_TEMP_COMPONENT.into(), metric::Value{
-			magnitude: (sample.raw_value as f64) / 16.0f64,
-			unit: metric::Unit::Celsius,
-		});
+		components.insert(
+			DS18B20_TEMP_COMPONENT.into(),
+			metric::Value {
+				magnitude: (sample.raw_value as f64) / 16.0f64,
+				unit: metric::Unit::Celsius,
+			},
+		);
 		let mut instance = SmartString::new();
 		instance.push_str("1w/");
 		for octet in sample.id.0.iter() {
 			write!(instance, "{:02x}", octet).unwrap();
 		}
-		Some(metric::Readout{
+		Some(metric::Readout {
 			timestamp: self.rtc.map_to_rtc(self.src.timestamp),
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				device_type: "ds18b20".into(),
 				instance,
 			},
@@ -116,7 +119,10 @@ impl<'x, T: rtcifier::RTCifier + 'static> ReadoutIterable<'x, T> for frame::SbxD
 pub struct BME280Readouts(Option<metric::Readout>);
 
 impl BME280Readouts {
-	fn from_msg(msg: &frame::SbxBME280Message, rtcifier: &mut impl rtcifier::RTCifier) -> BME280Readouts {
+	fn from_msg(
+		msg: &frame::SbxBME280Message,
+		rtcifier: &mut impl rtcifier::RTCifier,
+	) -> BME280Readouts {
 		let mut path: SmartString = "i2c-2/".into();
 		write!(path, "{:02x}", 0x76 | (msg.instance & 0x1)).expect("formatting");
 
@@ -126,22 +132,31 @@ impl BME280Readouts {
 		#[allow(non_snake_case)]
 		let (T, P, H) = readout.decodef(&calibration);
 		let mut components = metric::OrderedVec::new();
-		components.insert(BME280_TEMP_COMPONENT.into(), metric::Value{
-			magnitude: T,
-			unit: metric::Unit::Celsius,
-		});
-		components.insert(BME280_PRESSURE_COMPONENT.into(), metric::Value{
-			magnitude: P,
-			unit: metric::Unit::Pascal,
-		});
-		components.insert(BME280_HUMIDITY_COMPONENT.into(), metric::Value{
-			magnitude: H,
-			unit: metric::Unit::Percent,
-		});
+		components.insert(
+			BME280_TEMP_COMPONENT.into(),
+			metric::Value {
+				magnitude: T,
+				unit: metric::Unit::Celsius,
+			},
+		);
+		components.insert(
+			BME280_PRESSURE_COMPONENT.into(),
+			metric::Value {
+				magnitude: P,
+				unit: metric::Unit::Pascal,
+			},
+		);
+		components.insert(
+			BME280_HUMIDITY_COMPONENT.into(),
+			metric::Value {
+				magnitude: H,
+				unit: metric::Unit::Percent,
+			},
+		);
 
-		BME280Readouts(Some(metric::Readout{
+		BME280Readouts(Some(metric::Readout {
 			timestamp: ts,
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				instance: path,
 				device_type: "bme280".into(),
 			},
@@ -176,7 +191,7 @@ pub struct NoiseReadouts<'x, T: rtcifier::RTCifier> {
 
 impl<'x, T: rtcifier::RTCifier> NoiseReadouts<'x, T> {
 	fn from_msg(msg: &'x frame::SbxNoiseMessage, rtcifier: &'x mut T) -> Self {
-		Self{
+		Self {
 			rtc: rtcifier,
 			src: msg,
 			at: 0,
@@ -190,28 +205,37 @@ impl<'x, T: rtcifier::RTCifier> Iterator for NoiseReadouts<'x, T> {
 	fn next(&mut self) -> Option<Self::Item> {
 		let samples = &self.src.samples[..];
 		if self.at >= samples.len() {
-			return None
+			return None;
 		}
 
 		let sample = &samples[self.at];
 		self.at += 1;
 		let mut components = metric::OrderedVec::new();
-		components.insert(NOISE_MIN_COMPONENT.into(), metric::Value{
-			magnitude: sample.min as f64,
-			unit: metric::Unit::Arbitrary,
-		});
-		components.insert(NOISE_MAX_COMPONENT.into(), metric::Value{
-			magnitude: sample.max as f64,
-			unit: metric::Unit::Arbitrary,
-		});
-		components.insert(NOISE_RMS_COMPONENT.into(), metric::Value{
-			magnitude: (sample.sqavg as f64).sqrt(),
-			unit: metric::Unit::Arbitrary,
-		});
+		components.insert(
+			NOISE_MIN_COMPONENT.into(),
+			metric::Value {
+				magnitude: sample.min as f64,
+				unit: metric::Unit::Arbitrary,
+			},
+		);
+		components.insert(
+			NOISE_MAX_COMPONENT.into(),
+			metric::Value {
+				magnitude: sample.max as f64,
+				unit: metric::Unit::Arbitrary,
+			},
+		);
+		components.insert(
+			NOISE_RMS_COMPONENT.into(),
+			metric::Value {
+				magnitude: (sample.sqavg as f64).sqrt(),
+				unit: metric::Unit::Arbitrary,
+			},
+		);
 		let instance = "ch-0".into();
-		Some(metric::Readout{
+		Some(metric::Readout {
 			timestamp: self.rtc.map_to_rtc(sample.timestamp),
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				device_type: "mic-preamp".into(),
 				instance,
 			},
@@ -236,7 +260,7 @@ pub struct LightReadouts<'x, T: rtcifier::RTCifier> {
 
 impl<'x, T: rtcifier::RTCifier> LightReadouts<'x, T> {
 	fn from_msg(msg: &'x frame::SbxLightMessage, rtcifier: &'x mut T) -> Self {
-		Self{
+		Self {
 			rtc: rtcifier,
 			src: msg,
 			at: 0,
@@ -250,32 +274,44 @@ impl<'x, T: rtcifier::RTCifier> Iterator for LightReadouts<'x, T> {
 	fn next(&mut self) -> Option<Self::Item> {
 		let samples = &self.src.samples[..];
 		if self.at >= samples.len() {
-			return None
+			return None;
 		}
 
 		let sample = &samples[self.at];
 		self.at += 1;
 		let mut components = metric::OrderedVec::new();
-		components.insert(LIGHT_RED_COMPONENT.into(), metric::Value{
-			magnitude: sample.ch[0] as f64,
-			unit: metric::Unit::Arbitrary,
-		});
-		components.insert(LIGHT_GREEN_COMPONENT.into(), metric::Value{
-			magnitude: sample.ch[1] as f64,
-			unit: metric::Unit::Arbitrary,
-		});
-		components.insert(LIGHT_BLUE_COMPONENT.into(), metric::Value{
-			magnitude: sample.ch[2] as f64,
-			unit: metric::Unit::Arbitrary,
-		});
-		components.insert(LIGHT_CLEAR_COMPONENT.into(), metric::Value{
-			magnitude: sample.ch[3] as f64,
-			unit: metric::Unit::Arbitrary,
-		});
+		components.insert(
+			LIGHT_RED_COMPONENT.into(),
+			metric::Value {
+				magnitude: sample.ch[0] as f64,
+				unit: metric::Unit::Arbitrary,
+			},
+		);
+		components.insert(
+			LIGHT_GREEN_COMPONENT.into(),
+			metric::Value {
+				magnitude: sample.ch[1] as f64,
+				unit: metric::Unit::Arbitrary,
+			},
+		);
+		components.insert(
+			LIGHT_BLUE_COMPONENT.into(),
+			metric::Value {
+				magnitude: sample.ch[2] as f64,
+				unit: metric::Unit::Arbitrary,
+			},
+		);
+		components.insert(
+			LIGHT_CLEAR_COMPONENT.into(),
+			metric::Value {
+				magnitude: sample.ch[3] as f64,
+				unit: metric::Unit::Arbitrary,
+			},
+		);
 		let instance = "ch-0".into();
-		Some(metric::Readout{
+		Some(metric::Readout {
 			timestamp: self.rtc.map_to_rtc(sample.timestamp),
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				device_type: "tcs3200".into(),
 				instance,
 			},
@@ -307,8 +343,11 @@ pub struct StatusReadouts<'x> {
 }
 
 impl<'x> StatusReadouts<'x> {
-	fn from_msg(msg: &'x frame::SbxStatusMessage, rtcifier: &'x mut impl rtcifier::RTCifier) -> StatusReadouts<'x> {
-		StatusReadouts{
+	fn from_msg(
+		msg: &'x frame::SbxStatusMessage,
+		rtcifier: &'x mut impl rtcifier::RTCifier,
+	) -> StatusReadouts<'x> {
+		StatusReadouts {
 			ts: rtcifier.map_to_rtc(msg.uptime),
 			src: msg,
 			at: StatusPart::I2CMetrics(0),
@@ -358,19 +397,19 @@ impl<'x> Iterator for StatusReadouts<'x> {
 		let (next_state, result) = match self.at {
 			I2CMetrics(ch) => {
 				let mut path: SmartString = "i2c-".into();
-				write!(&mut path, "{}", ch+1).unwrap();
+				write!(&mut path, "{}", ch + 1).unwrap();
 				let mut components = metric::OrderedVec::new();
 				components.insert(
 					"txn_overruns".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.i2c_metrics[ch as usize].transaction_overruns as f64,
 						unit: metric::Unit::Total,
 					},
 				);
 
-				let readout = metric::Readout{
+				let readout = metric::Readout {
 					timestamp: self.ts.clone(),
-					path: metric::DevicePath{
+					path: metric::DevicePath {
 						instance: path,
 						device_type: "driver".into(),
 					},
@@ -385,29 +424,29 @@ impl<'x> Iterator for StatusReadouts<'x> {
 					},
 					Some(readout),
 				)
-			},
+			}
 			BME280Metrics(ch) => {
 				let mut path: SmartString = "i2c-2/".into();
 				write!(&mut path, "{:02x}", 0x76 | ch).unwrap();
 				let mut components = metric::OrderedVec::new();
 				components.insert(
 					"configure".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.bme280_metrics[ch as usize].configure_status as f64,
 						unit: metric::Unit::Status,
 					},
 				);
 				components.insert(
 					"timeouts".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.bme280_metrics[ch as usize].timeouts as f64,
 						unit: metric::Unit::Total,
 					},
 				);
 
-				let readout = metric::Readout{
+				let readout = metric::Readout {
 					timestamp: self.ts.clone(),
-					path: metric::DevicePath{
+					path: metric::DevicePath {
 						instance: path,
 						device_type: "driver".into(),
 					},
@@ -422,34 +461,34 @@ impl<'x> Iterator for StatusReadouts<'x> {
 					},
 					Some(readout),
 				)
-			},
+			}
 			TxBufferMetrics => {
 				let path: SmartString = "tx/buffers".into();
 				let mut components = metric::OrderedVec::new();
 				components.insert(
 					"most_allocated_buffers".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.tx_buffer_metrics.most_allocated as f64,
 						unit: metric::Unit::Arbitrary,
 					},
 				);
 				components.insert(
 					"allocated_buffers".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.tx_buffer_metrics.allocated as f64,
 						unit: metric::Unit::Arbitrary,
 					},
 				);
 				components.insert(
 					"ready_buffers".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.tx_buffer_metrics.ready as f64,
 						unit: metric::Unit::Arbitrary,
 					},
 				);
 				components.insert(
 					"total_buffers".into(),
-					metric::Value{
+					metric::Value {
 						magnitude: self.src.tx_buffer_metrics.total as f64,
 						unit: metric::Unit::Arbitrary,
 					},
@@ -457,16 +496,16 @@ impl<'x> Iterator for StatusReadouts<'x> {
 
 				(
 					CpuMetrics,
-					Some(metric::Readout{
+					Some(metric::Readout {
 						timestamp: self.ts.clone(),
-						path: metric::DevicePath{
+						path: metric::DevicePath {
 							instance: path,
 							device_type: "kernel".into(),
 						},
 						components,
 					}),
 				)
-			},
+			}
 			CpuMetrics => {
 				let path: SmartString = "cpu-0".into();
 				let mut components = metric::OrderedVec::new();
@@ -474,11 +513,11 @@ impl<'x> Iterator for StatusReadouts<'x> {
 				for (i, ticks) in self.src.cpu_samples.iter().enumerate() {
 					let label = cpu_task_name(i as u8);
 					if label == "" {
-						continue
+						continue;
 					}
 					components.insert(
 						label.into(),
-						metric::Value{
+						metric::Value {
 							unit: metric::Unit::Total,
 							magnitude: *ticks as f64,
 						},
@@ -487,16 +526,16 @@ impl<'x> Iterator for StatusReadouts<'x> {
 
 				(
 					Eof,
-					Some(metric::Readout{
+					Some(metric::Readout {
 						timestamp: self.ts.clone(),
-						path: metric::DevicePath{
+						path: metric::DevicePath {
 							instance: path,
 							device_type: "kernel".into(),
 						},
 						components,
 					}),
 				)
-			},
+			}
 			Eof => (Eof, None),
 		};
 		self.at = next_state;
@@ -512,12 +551,11 @@ impl<'x, T: rtcifier::RTCifier> ReadoutIterable<'x, T> for frame::SbxStatusMessa
 	}
 }
 
-
 #[cfg(test)]
 mod test_ds18b20readouts {
 	use super::*;
 
-	use chrono::{Utc, TimeZone, DateTime, Duration};
+	use chrono::{DateTime, Duration, TimeZone, Utc};
 
 	use crate::sbx::rtcifier::RTCifier;
 
@@ -531,14 +569,12 @@ mod test_ds18b20readouts {
 	#[test]
 	fn test_emits_metrics() {
 		let (mut rtc, dt0) = new_rtc();
-		let msg = frame::SbxDS18B20Message{
+		let msg = frame::SbxDS18B20Message {
 			timestamp: 1000,
-			samples: vec![
-				frame::DS18B20Sample{
-					id: frame::DS18B20Id([0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8]),
-					raw_value: 0x0263,
-				}
-			],
+			samples: vec![frame::DS18B20Sample {
+				id: frame::DS18B20Id([0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8]),
+				raw_value: 0x0263,
+			}],
 		};
 
 		let mut iter = DS18B20Readouts::from_msg(&msg, &mut rtc);
@@ -546,8 +582,17 @@ mod test_ds18b20readouts {
 		assert_eq!(item.timestamp, dt0 + Duration::seconds(1));
 		assert_eq!(item.path.device_type, "ds18b20");
 		assert_eq!(item.path.instance, "1w/0001020304050607");
-		assert_eq!(item.components.get(DS18B20_TEMP_COMPONENT).unwrap().magnitude, 38.1875f64);
-		assert_eq!(item.components.get(DS18B20_TEMP_COMPONENT).unwrap().unit, metric::Unit::Celsius);
+		assert_eq!(
+			item.components
+				.get(DS18B20_TEMP_COMPONENT)
+				.unwrap()
+				.magnitude,
+			38.1875f64
+		);
+		assert_eq!(
+			item.components.get(DS18B20_TEMP_COMPONENT).unwrap().unit,
+			metric::Unit::Celsius
+		);
 
 		assert!(iter.next().is_none());
 	}
@@ -555,20 +600,19 @@ mod test_ds18b20readouts {
 	#[test]
 	fn test_emits_metrics_for_multiple_ids() {
 		let (mut rtc, dt0) = new_rtc();
-		let msg = frame::SbxDS18B20Message{
+		let msg = frame::SbxDS18B20Message {
 			timestamp: 1000,
 			samples: vec![
-				frame::DS18B20Sample{
+				frame::DS18B20Sample {
 					id: frame::DS18B20Id([0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8]),
 					raw_value: 0x0263,
 				},
-				frame::DS18B20Sample{
+				frame::DS18B20Sample {
 					id: frame::DS18B20Id([
-						0x10u8, 0x11u8, 0x12u8, 0x13u8,
-						0x14u8, 0x15u8, 0x16u8, 0x17u8,
+						0x10u8, 0x11u8, 0x12u8, 0x13u8, 0x14u8, 0x15u8, 0x16u8, 0x17u8,
 					]),
 					raw_value: -0x0132,
-				}
+				},
 			],
 		};
 
@@ -577,15 +621,33 @@ mod test_ds18b20readouts {
 		assert_eq!(item.timestamp, dt0 + Duration::seconds(1));
 		assert_eq!(item.path.device_type, "ds18b20");
 		assert_eq!(item.path.instance, "1w/0001020304050607");
-		assert_eq!(item.components.get(DS18B20_TEMP_COMPONENT).unwrap().magnitude, 38.1875f64);
-		assert_eq!(item.components.get(DS18B20_TEMP_COMPONENT).unwrap().unit, metric::Unit::Celsius);
+		assert_eq!(
+			item.components
+				.get(DS18B20_TEMP_COMPONENT)
+				.unwrap()
+				.magnitude,
+			38.1875f64
+		);
+		assert_eq!(
+			item.components.get(DS18B20_TEMP_COMPONENT).unwrap().unit,
+			metric::Unit::Celsius
+		);
 
 		let item = iter.next().unwrap();
 		assert_eq!(item.timestamp, dt0 + Duration::seconds(1));
 		assert_eq!(item.path.device_type, "ds18b20");
 		assert_eq!(item.path.instance, "1w/1011121314151617");
-		assert_eq!(item.components.get(DS18B20_TEMP_COMPONENT).unwrap().magnitude, -19.125f64);
-		assert_eq!(item.components.get(DS18B20_TEMP_COMPONENT).unwrap().unit, metric::Unit::Celsius);
+		assert_eq!(
+			item.components
+				.get(DS18B20_TEMP_COMPONENT)
+				.unwrap()
+				.magnitude,
+			-19.125f64
+		);
+		assert_eq!(
+			item.components.get(DS18B20_TEMP_COMPONENT).unwrap().unit,
+			metric::Unit::Celsius
+		);
 
 		assert!(iter.next().is_none());
 	}

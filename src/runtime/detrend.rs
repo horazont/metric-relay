@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::{warn, debug};
+use log::{debug, warn};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -10,8 +10,7 @@ use crate::metric;
 
 use super::adapter::Serializer;
 use super::payload;
-use super::traits::{Source, Sink, null_receiver};
-
+use super::traits::{null_receiver, Sink, Source};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Mode {
@@ -34,14 +33,14 @@ fn linear_regression<'a>(vs: impl Iterator<Item = &'a (f32, f32)>) -> (f32, f32)
 
 	for (x, y) in vs {
 		n += 1;
-		prodsum += x*y;
+		prodsum += x * y;
 		xsum += x;
-		xsqsum += x*x;
+		xsqsum += x * x;
 		ysum += y;
 	}
 
 	let n = n as f32;
-	let beta = (n * prodsum - xsum*ysum) / (n * xsqsum - xsum*xsum);
+	let beta = (n * prodsum - xsum * ysum) / (n * xsqsum - xsum * xsum);
 	let alpha = ysum / n - beta * xsum / n;
 	(alpha, beta)
 }
@@ -70,39 +69,27 @@ fn detrend<'x>(ps: &'x mut [(f32, f32)]) {
 
 impl DetrendWorker {
 	pub fn spawn(
-			source: mpsc::Receiver<payload::Stream>,
-			sink: broadcast::Sender<payload::Stream>,
-			mode: Mode,
-			)
-	{
-		let mut worker = Self{
-			source,
-			sink,
-			mode,
-		};
-		tokio::spawn(async move {
-			worker.run().await
-		});
+		source: mpsc::Receiver<payload::Stream>,
+		sink: broadcast::Sender<payload::Stream>,
+		mode: Mode,
+	) {
+		let mut worker = Self { source, sink, mode };
+		tokio::spawn(async move { worker.run().await });
 	}
 
-	fn process(
-			block: payload::Stream,
-			sink: broadcast::Sender<payload::Stream>,
-			mode: Mode)
-	{
+	fn process(block: payload::Stream, sink: broadcast::Sender<payload::Stream>, mode: Mode) {
 		// TODO: take masking into account then
 		let mut coords: Vec<_> = match *block.data {
-			metric::RawData::I16(ref vs) => {
-				vs.iter_unmasked_enumerated().map(|(i, v)| {
-					(i as f32, *v as f32)
-				}).collect()
-			},
+			metric::RawData::I16(ref vs) => vs
+				.iter_unmasked_enumerated()
+				.map(|(i, v)| (i as f32, *v as f32))
+				.collect(),
 		};
 		match mode {
 			Mode::Constant => debias(&mut coords[..]),
 			Mode::Linear => detrend(&mut coords[..]),
 		};
-		let result = Arc::new(metric::StreamBlock{
+		let result = Arc::new(metric::StreamBlock {
 			t0: block.t0,
 			seq0: block.seq0,
 			period: block.period,
@@ -113,9 +100,9 @@ impl DetrendWorker {
 					let mut vs = vs.clone();
 					for (dest, (_, y)) in vs.iter_unmasked_mut(..).zip(coords.iter()) {
 						*dest = y.min(i16::MAX as f32).max(i16::MIN as f32) as i16
-					};
+					}
 					metric::RawData::I16(vs)
-				},
+				}
 			}),
 		});
 		match sink.send(result) {
@@ -136,20 +123,17 @@ impl DetrendWorker {
 
 			let sink = self.sink.clone();
 			let mode = self.mode;
-			let result = spawn_blocking(move || {
-				Self::process(block, sink, mode)
-			}).await;
+			let result = spawn_blocking(move || Self::process(block, sink, mode)).await;
 			match result {
 				Ok(_) => (),
 				Err(e) => {
 					warn!("detrend task crashed: {}. data lost.", e);
 					continue;
-				},
+				}
 			}
 		}
 	}
 }
-
 
 pub struct Detrend {
 	serializer: Serializer<payload::Stream>,
@@ -160,15 +144,8 @@ impl Detrend {
 	pub fn new(mode: Mode) -> Self {
 		let (zygote, _) = broadcast::channel(128);
 		let (serializer, source) = Serializer::new(8);
-		DetrendWorker::spawn(
-			source,
-			zygote.clone(),
-			mode,
-		);
-		Self{
-			serializer,
-			zygote,
-		}
+		DetrendWorker::spawn(source, zygote.clone(), mode);
+		Self { serializer, zygote }
 	}
 }
 

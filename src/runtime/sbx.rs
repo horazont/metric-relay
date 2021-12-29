@@ -1,25 +1,25 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{warn, info, debug, trace};
+use log::{debug, info, trace, warn};
 
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 
-use chrono::{Utc, TimeZone, Duration as ChronoDuration};
+use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 
 use enum_map::{enum_map, EnumMap};
 
-use bytes::{Buf};
+use bytes::Buf;
 
 use crate::metric;
-use crate::snurl;
 use crate::sbx;
+use crate::sbx::{RTCifier, ReadoutIterable};
+use crate::snurl;
 use crate::stream;
-use crate::sbx::{ReadoutIterable, RTCifier};
 
-use super::traits;
 use super::payload;
+use super::traits;
 
 pub struct SBXSource {
 	sample_zygote: broadcast::Sender<payload::Sample>,
@@ -45,23 +45,23 @@ impl SBXSourceWorker {
 		path_prefix: String,
 		sample_sink: broadcast::Sender<payload::Sample>,
 		stream_sink: broadcast::Sender<payload::Stream>,
-		stop_ch: oneshot::Receiver<()>)
-	{
+		stop_ch: oneshot::Receiver<()>,
+	) {
 		let accel_period = Duration::from_millis(5);
 		let accel_slice = ChronoDuration::seconds(60);
-		let accel_scale = metric::Value{
+		let accel_scale = metric::Value {
 			magnitude: 19.6133,
 			unit: metric::Unit::MeterPerSqSecond,
 		};
 
 		let compass_period = Duration::from_millis(320);
 		let compass_slice = ChronoDuration::seconds(64);
-		let compass_scale = metric::Value{
+		let compass_scale = metric::Value {
 			magnitude: 0.0002,
 			unit: metric::Unit::Tesla,
 		};
 
-		let mut worker = Self{
+		let mut worker = Self {
 			path_prefix,
 			sample_sink,
 			stream_sink,
@@ -89,23 +89,23 @@ impl SBXSourceWorker {
 		path_prefix: String,
 		sample_sink: broadcast::Sender<payload::Sample>,
 		stream_sink: broadcast::Sender<payload::Stream>,
-		stop_ch: oneshot::Receiver<()>)
-	{
+		stop_ch: oneshot::Receiver<()>,
+	) {
 		let accel_period = Duration::from_millis(5);
 		let accel_slice = ChronoDuration::seconds(60);
-		let accel_scale = metric::Value{
+		let accel_scale = metric::Value {
 			magnitude: 19.6133,
 			unit: metric::Unit::MeterPerSqSecond,
 		};
 
 		let compass_period = Duration::from_millis(320);
 		let compass_slice = ChronoDuration::seconds(64);
-		let compass_scale = metric::Value{
+		let compass_scale = metric::Value {
 			magnitude: 0.0002,
 			unit: metric::Unit::Tesla,
 		};
 
-		let mut worker = Self{
+		let mut worker = Self {
 			path_prefix,
 			sample_sink,
 			stream_sink,
@@ -129,15 +129,21 @@ impl SBXSourceWorker {
 
 	fn process_ready(&mut self, msg: sbx::Message) {
 		let prefix = &self.path_prefix;
-		let readouts = msg.readouts(&mut self.rtcifier).map(|mut x| {
-			x.path.instance.insert_str(0, prefix);
-			Arc::new(x)
-		}).collect();
+		let readouts = msg
+			.readouts(&mut self.rtcifier)
+			.map(|mut x| {
+				x.path.instance.insert_str(0, prefix);
+				Arc::new(x)
+			})
+			.collect();
 		match self.sample_sink.send(readouts) {
 			Ok(_) => (),
 			Err(broadcast::error::SendError(readouts)) => {
-				warn!("dropped {} readouts because of no receivers", readouts.len());
-			},
+				warn!(
+					"dropped {} readouts because of no receivers",
+					readouts.len()
+				);
+			}
 		}
 
 		match msg {
@@ -145,8 +151,12 @@ impl SBXSourceWorker {
 				// we need to align the IMU streams here, and we can only do that after the main RTCifier synced, which is why we do it here.
 				for (kind, dec) in self.stream_decoders.iter_mut() {
 					let index = match kind {
-						sbx::StreamKind::AccelX | sbx::StreamKind::AccelY | sbx::StreamKind::AccelZ => 0,
-						sbx::StreamKind::CompassX | sbx::StreamKind::CompassY | sbx::StreamKind::CompassZ => 1,
+						sbx::StreamKind::AccelX
+						| sbx::StreamKind::AccelY
+						| sbx::StreamKind::AccelZ => 0,
+						sbx::StreamKind::CompassX
+						| sbx::StreamKind::CompassY
+						| sbx::StreamKind::CompassZ => 1,
 					};
 					let stream_info = &msg.imu_streams[index];
 					let rtc = self.rtcifier.map_to_rtc(stream_info.timestamp);
@@ -157,11 +167,14 @@ impl SBXSourceWorker {
 						info!("decoder for stream {:?} became ready", kind);
 					}
 				}
-			},
+			}
 			sbx::Message::StreamData(ref streammsg) => {
 				let decoder = &mut self.stream_decoders[streammsg.kind];
 				if !decoder.ready() {
-					warn!("(re-)buffering stream message for {:?} because decoder is not ready", streammsg.kind);
+					warn!(
+						"(re-)buffering stream message for {:?} because decoder is not ready",
+						streammsg.kind
+					);
 					drop(streammsg);
 					self.buffer.push(Box::new(msg));
 				} else {
@@ -172,12 +185,14 @@ impl SBXSourceWorker {
 					match decoder.read_next() {
 						Some(block) => match self.stream_sink.send(Arc::new(block)) {
 							Ok(_) => (),
-							Err(_) => warn!("dropped stream data because no receivers were ready to receive"),
+							Err(_) => warn!(
+								"dropped stream data because no receivers were ready to receive"
+							),
 						},
 						None => (),
 					};
 				}
-			},
+			}
 			_ => (),
 		}
 	}
@@ -204,7 +219,7 @@ impl SBXSourceWorker {
 		if !self.rtcifier.ready() {
 			debug!("rtcifier is not ready yet, buffering message...");
 			self.buffer.push(Box::new(msg));
-			return Ok(())
+			return Ok(());
 		}
 
 		if self.buffer.len() > 0 {
@@ -223,7 +238,7 @@ impl SBXSourceWorker {
 		match hdr.type_ {
 			sbx::EspMessageType::Status => {
 				// TODO
-			},
+			}
 			sbx::EspMessageType::DataPassthrough => {
 				self.process_sbx(hdr.timestamp, src)?;
 			}
@@ -295,7 +310,7 @@ impl SBXSource {
 			stream_zygote.clone(),
 			stop_ch,
 		);
-		Self{
+		Self {
 			sample_zygote,
 			stream_zygote,
 			guard,

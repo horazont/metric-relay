@@ -22,18 +22,18 @@ static DP_K3: f64 = 243.12;
 /// Returns None if the values are out of bounds for a heat index calculation.
 pub fn heat_index(temperature: f64, humidity: f64) -> Option<f64> {
 	if temperature < 20f64 {
-		return None
+		return None;
 	}
 	Some(
-		HI_C1 +
-		HI_C2*temperature +
-		HI_C3*humidity +
-		HI_C4*temperature*humidity +
-		HI_C5*temperature*temperature +
-		HI_C6*humidity*humidity +
-		HI_C7*temperature*temperature*humidity +
-		HI_C8*humidity*humidity*temperature +
-		HI_C9*humidity*humidity*temperature*temperature
+		HI_C1
+			+ HI_C2 * temperature
+			+ HI_C3 * humidity
+			+ HI_C4 * temperature * humidity
+			+ HI_C5 * temperature * temperature
+			+ HI_C6 * humidity * humidity
+			+ HI_C7 * temperature * temperature * humidity
+			+ HI_C8 * humidity * humidity * temperature
+			+ HI_C9 * humidity * humidity * temperature * temperature,
 	)
 }
 
@@ -47,21 +47,23 @@ pub fn heat_index(temperature: f64, humidity: f64) -> Option<f64> {
 /// of celsius, humidity in %rH. The acceleration of gravity must be given as
 /// meter per second square and the height in meters.
 pub fn barometric_correction(
-		pressure: f64,
-		temperature: f64,
-		humidity: f64,
-		g_0: f64,
-		height: f64) -> f64
-{
+	pressure: f64,
+	temperature: f64,
+	humidity: f64,
+	g_0: f64,
+	height: f64,
+) -> f64 {
 	let abs_temperature = temperature + KELVIN_OFFSET;
 	let temp_coeff = 6.112 * (DP_K2 * temperature / (DP_K3 + temperature)).exp();
 	let humidity_norm = humidity / 100.0;
-	pressure * (
-		g_0 / (PRESSURE_R_STAR * (
-			abs_temperature + PRESSURE_C * temp_coeff * humidity_norm +
-			PRESSURE_A * height / 2.0
-		)) * height
-	).exp()
+	pressure
+		* (g_0
+			/ (PRESSURE_R_STAR
+				* (abs_temperature
+					+ PRESSURE_C * temp_coeff * humidity_norm
+					+ PRESSURE_A * height / 2.0))
+			* height)
+			.exp()
 }
 
 /// Calculate the dewpoint from temperature and humidity.
@@ -76,21 +78,15 @@ pub fn dewpoint(temperature: f64, humidity: f64) -> f64 {
 	let humidity = humidity / 100.0;
 	let ln_h = humidity.ln();
 
-	DP_K3 * (
-		DP_K2 * temperature / (DP_K3 + temperature) + ln_h
-	) / (
-		DP_K2 * DP_K3 / (DP_K3 + temperature) - ln_h
-	)
+	DP_K3 * (DP_K2 * temperature / (DP_K3 + temperature) + ln_h)
+		/ (DP_K2 * DP_K3 / (DP_K3 + temperature) - ln_h)
 }
 
 pub fn wet_bulb_temperature(temperature: f64, humidity: f64) -> f64 {
-	temperature * (
-		0.151977 * (humidity + 8.313659).sqrt()
-	).atan() + (temperature + humidity).atan() - (
-		humidity - 1.676331
-	).atan() + 0.00391838 * (humidity).powf(1.5) * (
-		0.023101 * humidity
-	).atan() - 4.686035
+	temperature * (0.151977 * (humidity + 8.313659).sqrt()).atan() + (temperature + humidity).atan()
+		- (humidity - 1.676331).atan()
+		+ 0.00391838 * (humidity).powf(1.5) * (0.023101 * humidity).atan()
+		- 4.686035
 }
 
 #[cfg(test)]
@@ -100,13 +96,7 @@ mod test_barometric_correction {
 	#[test]
 	fn reference_test() {
 		assert_eq!(
-			barometric_correction(
-				1005.0,
-				23.0,
-				60.0,
-				9.81,
-				135.0,
-			),
+			barometric_correction(1005.0, 23.0, 60.0, 9.81, 135.0,),
 			1020.6484499141941f64,
 		);
 	}
@@ -118,10 +108,7 @@ mod test_dewpoint {
 
 	#[test]
 	fn reference_test() {
-		assert_eq!(
-			dewpoint(23.42, 42.23),
-			9.851421915753248,
-		);
+		assert_eq!(dewpoint(23.42, 42.23), 9.851421915753248,);
 	}
 }
 
@@ -131,9 +118,6 @@ mod test_wet_bulb_temperature {
 
 	#[test]
 	fn reference_test() {
-		assert_eq!(
-			wet_bulb_temperature(23.42, 42.23),
-			15.454027588538501,
-		);
+		assert_eq!(wet_bulb_temperature(23.42, 42.23), 15.454027588538501,);
 	}
 }

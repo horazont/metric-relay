@@ -3,17 +3,17 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use smartstring::alias::String as SmartString;
 use std::time::Duration;
-use smartstring::alias::{String as SmartString};
 
 #[cfg(feature = "metric-serde")]
 use serde_derive::{Deserialize, Serialize};
 
-mod orderedvec;
 mod maskedarray;
+mod orderedvec;
 
-pub use orderedvec::OrderedVec;
 pub use maskedarray::{MaskedArray, MaskedArrayWriter};
+pub use orderedvec::OrderedVec;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]

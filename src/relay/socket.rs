@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Instant, Duration};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use log::{trace, debug, error, warn, info};
+use log::{debug, error, info, trace, warn};
 
 use rand;
 use rand::Rng;
 
+use tokio::select;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::sync::broadcast;
-use tokio::select;
 
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
@@ -41,12 +41,12 @@ pub struct SessionConfig {
 
 impl RecvSessionState {
 	async fn run(
-			&self,
-			cfg: Arc<SessionConfig>,
-			mut socket: FramedStream,
-			mut stop_ch: oneshot::Receiver<()>,
-			event_ch: mpsc::Sender<RecvEvent>)
-	{
+		&self,
+		cfg: Arc<SessionConfig>,
+		mut socket: FramedStream,
+		mut stop_ch: oneshot::Receiver<()>,
+		event_ch: mpsc::Sender<RecvEvent>,
+	) {
 		let mut last_contact = Instant::now();
 		loop {
 			let now = Instant::now();
@@ -103,41 +103,49 @@ impl RecvSessionState {
 			};
 
 			match frame {
-				frame::Frame::ClientHello{..} | frame::Frame::ServerHello{..} | frame::Frame::Ack{..} => {
-					debug!("closing connection because of protocol violation; received {:?}", frame);
+				frame::Frame::ClientHello { .. }
+				| frame::Frame::ServerHello { .. }
+				| frame::Frame::Ack { .. } => {
+					debug!(
+						"closing connection because of protocol violation; received {:?}",
+						frame
+					);
 					let _ = event_ch.send(RecvEvent::SocketError).await;
 					return;
-				},
+				}
 				frame::Frame::Pong => (),
-				frame::Frame::Ping => {
-					match socket.send(&frame::Frame::Pong).await {
-						Ok(()) => (),
-						Err(e) => {
-							warn!("failed to send pong: {}", e);
-							let _ = event_ch.send(RecvEvent::SocketError).await;
-							return;
-						},
+				frame::Frame::Ping => match socket.send(&frame::Frame::Pong).await {
+					Ok(()) => (),
+					Err(e) => {
+						warn!("failed to send pong: {}", e);
+						let _ = event_ch.send(RecvEvent::SocketError).await;
+						return;
 					}
 				},
 				frame::Frame::RequestAck => {
-					match socket.send(&frame::Frame::Ack{last_received: self.last_received.load(Ordering::Relaxed)}).await {
+					match socket
+						.send(&frame::Frame::Ack {
+							last_received: self.last_received.load(Ordering::Relaxed),
+						})
+						.await
+					{
 						Ok(()) => (),
 						Err(e) => {
 							warn!("failed to send ack: {}", e);
 							let _ = event_ch.send(RecvEvent::SocketError).await;
 							return;
-						},
+						}
 					}
-				},
+				}
 				frame::Frame::Data(data) => {
 					match event_ch.send(RecvEvent::DataFrame(data)).await {
 						Ok(()) => (),
 						Err(_) => {
 							debug!("shutting down worker because the receiver is gone");
 							return;
-						},
+						}
 					};
-				},
+				}
 			};
 		}
 	}
@@ -158,36 +166,35 @@ impl ConnectionManager {
 	fn new(config: Arc<SessionConfig>) -> (Self, mpsc::Receiver<RecvEvent>) {
 		let (sink, socket_src) = mpsc::channel(16);
 		let (zygote, events) = mpsc::channel(8);
-		let result = ConnectionManager{
-			sink,
-		};
+		let result = ConnectionManager { sink };
 		tokio::spawn(async move {
-			Self::run(
-				config,
-				socket_src,
-				zygote,
-			).await;
+			Self::run(config, socket_src, zygote).await;
 		});
 		(result, events)
 	}
 
 	async fn handshake(
-			conn: tokio::net::TcpStream,
-			connections: &mut HashMap<frame::ClientId, RecvSession>,
-			config: Arc<SessionConfig>,
-			zygote: &mpsc::Sender<RecvEvent>) -> Result<(), StdIoError> {
+		conn: tokio::net::TcpStream,
+		connections: &mut HashMap<frame::ClientId, RecvSession>,
+		config: Arc<SessionConfig>,
+		zygote: &mpsc::Sender<RecvEvent>,
+	) -> Result<(), StdIoError> {
 		let mut ep = tokio_util::codec::Framed::new(conn, frame::FrameCodec());
 		let client_id = match ep.next().await {
-			None => return Err(StdIoError::new(
-				StdIoErrorKind::UnexpectedEof,
-				format!("connection closed while reading ClientHello")
-			)),
+			None => {
+				return Err(StdIoError::new(
+					StdIoErrorKind::UnexpectedEof,
+					format!("connection closed while reading ClientHello"),
+				))
+			}
 			Some(v) => match v? {
-				frame::Frame::ClientHello{client_id} => client_id,
-				other => return Err(StdIoError::new(
-					StdIoErrorKind::InvalidData,
-					format!("expected ClientHello, received {:?}", other),
-				)),
+				frame::Frame::ClientHello { client_id } => client_id,
+				other => {
+					return Err(StdIoError::new(
+						StdIoErrorKind::InvalidData,
+						format!("expected ClientHello, received {:?}", other),
+					))
+				}
 			},
 		};
 
@@ -195,32 +202,35 @@ impl ConnectionManager {
 			Some(existing) => {
 				let state = existing.state.clone();
 				(Some(state.last_received.load(Ordering::Relaxed)), state)
-			},
+			}
 			None => {
-				let new_state = Arc::new(RecvSessionState{
+				let new_state = Arc::new(RecvSessionState {
 					// TODO: this is technically incorrect ...
 					last_received: AtomicU64::new(0),
 				});
 				(None, new_state)
-			},
+			}
 		};
 
-		ep.feed(&frame::Frame::ServerHello{
-			last_received,
-		}).await?;
+		ep.feed(&frame::Frame::ServerHello { last_received })
+			.await?;
 		ep.send(&frame::Frame::Ping).await?;
 
 		match ep.next().await {
-			None => return Err(StdIoError::new(
-				StdIoErrorKind::UnexpectedEof,
-				format!("connection closed while reading Pong")
-			)),
+			None => {
+				return Err(StdIoError::new(
+					StdIoErrorKind::UnexpectedEof,
+					format!("connection closed while reading Pong"),
+				))
+			}
 			Some(v) => match v? {
 				frame::Frame::Pong => (),
-				other => return Err(StdIoError::new(
-					StdIoErrorKind::InvalidData,
-					format!("expected Pong, received {:?}", other),
-				)),
+				other => {
+					return Err(StdIoError::new(
+						StdIoErrorKind::InvalidData,
+						format!("expected Pong, received {:?}", other),
+					))
+				}
 			},
 		}
 
@@ -228,26 +238,24 @@ impl ConnectionManager {
 		let (my_guard, their_guard) = oneshot::channel();
 		let event_ch = zygote.clone();
 		tokio::spawn(async move {
-			coro_state.run(
-				config,
-				ep,
-				their_guard,
-				event_ch,
-			).await;
+			coro_state.run(config, ep, their_guard, event_ch).await;
 		});
 		// if an old session existed, this insert will cause it to be dropped, thereby gracefully stopping the coroutine which was servicing it and cleaning up the socket and all that
 		// TODO: maybe consider if the timing of this is right, but I think it is.
-		connections.insert(client_id, RecvSession{
-			state,
-			guard: my_guard,
-		});
+		connections.insert(
+			client_id,
+			RecvSession {
+				state,
+				guard: my_guard,
+			},
+		);
 		Ok(())
 	}
 
 	async fn run(
-			config: Arc<SessionConfig>,
-			mut sockets: mpsc::Receiver<(tokio::net::TcpStream, std::net::SocketAddr)>,
-			zygote: mpsc::Sender<RecvEvent>,
+		config: Arc<SessionConfig>,
+		mut sockets: mpsc::Receiver<(tokio::net::TcpStream, std::net::SocketAddr)>,
+		zygote: mpsc::Sender<RecvEvent>,
 	) {
 		let mut connections = HashMap::<frame::ClientId, RecvSession>::new();
 		loop {
@@ -256,7 +264,7 @@ impl ConnectionManager {
 				None => {
 					debug!("shutting down connection manager coroutine");
 					return;
-				},
+				}
 			};
 
 			select! {
@@ -280,7 +288,9 @@ impl ConnectionManager {
 	fn try_send(&self, sock: tokio::net::TcpStream, addr: std::net::SocketAddr) -> bool {
 		match self.sink.try_send((sock, addr)) {
 			Err(mpsc::error::TrySendError::Full(_)) => false,
-			Err(mpsc::error::TrySendError::Closed(_)) => panic!("connection manager task crashed?!"),
+			Err(mpsc::error::TrySendError::Closed(_)) => {
+				panic!("connection manager task crashed?!")
+			}
 			Ok(_) => true,
 		}
 	}
@@ -296,9 +306,14 @@ struct RecvState {
 }
 
 impl RecvState {
-	pub fn new(inner: tokio::net::TcpListener, config: Arc<SessionConfig>, sink: broadcast::Sender<frame::DataFrame>, stop_ch: oneshot::Receiver<()>) -> Self {
+	pub fn new(
+		inner: tokio::net::TcpListener,
+		config: Arc<SessionConfig>,
+		sink: broadcast::Sender<frame::DataFrame>,
+		stop_ch: oneshot::Receiver<()>,
+	) -> Self {
 		let (connections, events) = ConnectionManager::new(config);
-		Self{
+		Self {
 			inner,
 			connections,
 			events,
@@ -354,13 +369,8 @@ impl RecvSocket {
 		let (zygote, _) = broadcast::channel(8);
 		let (guard, stop_ch) = oneshot::channel();
 		let mut state = RecvState::new(listener, cfg, zygote.clone(), stop_ch);
-		tokio::spawn(async move {
-			state.run().await
-		});
-		Self{
-			zygote,
-			guard,
-		}
+		tokio::spawn(async move { state.run().await });
+		Self { zygote, guard }
 	}
 
 	pub fn subscribe(&self) -> broadcast::Receiver<frame::DataFrame> {
@@ -377,7 +387,7 @@ struct SendState<T: tokio::net::ToSocketAddrs + Sync + Send + 'static> {
 impl<T: tokio::net::ToSocketAddrs + Sync + Send + 'static> SendState<T> {
 	pub fn new(data: mpsc::Receiver<frame::DataFrame>, addrs: T) -> Self {
 		let client_id: u128 = rand::thread_rng().gen::<u128>();
-		Self{
+		Self {
 			client_id,
 			data,
 			addrs: addrs,
@@ -385,24 +395,29 @@ impl<T: tokio::net::ToSocketAddrs + Sync + Send + 'static> SendState<T> {
 	}
 
 	async fn handshake(&mut self, ep: &mut FramedStream) -> Result<(), std::io::Error> {
-		ep.send(&frame::Frame::ClientHello{
+		ep.send(&frame::Frame::ClientHello {
 			client_id: self.client_id,
-		}).await?;
+		})
+		.await?;
 
 		match ep.next().await {
-			None => return Err(StdIoError::new(
-				StdIoErrorKind::UnexpectedEof,
-				format!("connection closed while reading ServerHello")
-			)),
+			None => {
+				return Err(StdIoError::new(
+					StdIoErrorKind::UnexpectedEof,
+					format!("connection closed while reading ServerHello"),
+				))
+			}
 			Some(Ok(_)) => (),
 			Some(Err(e)) => return Err(e),
 		};
 
 		match ep.next().await {
-			None => return Err(StdIoError::new(
-				StdIoErrorKind::UnexpectedEof,
-				format!("connection closed while reading initial Ping")
-			)),
+			None => {
+				return Err(StdIoError::new(
+					StdIoErrorKind::UnexpectedEof,
+					format!("connection closed while reading initial Ping"),
+				))
+			}
 			Some(Ok(_)) => (),
 			Some(Err(e)) => return Err(e),
 		};
@@ -453,10 +468,13 @@ impl<T: tokio::net::ToSocketAddrs + Sync + Send + 'static> SendState<T> {
 			let sock = match tokio::net::TcpStream::connect(&self.addrs).await {
 				Ok(s) => s,
 				Err(e) => {
-					warn!("failed to establish connection to receiver, retrying soon: {}", e);
+					warn!(
+						"failed to establish connection to receiver, retrying soon: {}",
+						e
+					);
 					tokio::time::sleep(Duration::new(5, 0)).await;
 					continue;
-				},
+				}
 			};
 			let mut ep = tokio_util::codec::Framed::new(sock, frame::FrameCodec());
 			match self.handshake(&mut ep).await {
@@ -465,13 +483,13 @@ impl<T: tokio::net::ToSocketAddrs + Sync + Send + 'static> SendState<T> {
 					warn!("handshake failed ({}), retrying soon.", e);
 					tokio::time::sleep(Duration::new(5, 0)).await;
 					continue;
-				},
+				}
 			};
 			match self.socket_worker(ep).await {
 				Ok(()) => {
 					info!("channel closed, exiting");
 					return;
-				},
+				}
 				Err(e) => {
 					debug!("lost client connection, reconnecting immediately: {}", e);
 				}
@@ -487,13 +505,9 @@ pub struct SendSocket {
 impl SendSocket {
 	pub fn new<T: tokio::net::ToSocketAddrs + Send + Sync + 'static>(addrs: T) -> Self {
 		let (sink, data_ch) = mpsc::channel(8);
-		let result = Self{
-			sink,
-		};
+		let result = Self { sink };
 		let mut state = SendState::new(data_ch, addrs);
-		tokio::spawn(async move {
-			state.run().await
-		});
+		tokio::spawn(async move { state.run().await });
 		result
 	}
 
@@ -502,7 +516,7 @@ impl SendSocket {
 			Ok(()) => (),
 			Err(_) => {
 				panic!("processor task has crashed");
-			},
+			}
 		}
 	}
 }
@@ -510,8 +524,8 @@ impl SendSocket {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use env_logger;
 	use crate::metric;
+	use env_logger;
 
 	use chrono::Utc;
 
@@ -519,38 +533,47 @@ mod tests {
 	async fn test_sockets() {
 		env_logger::init();
 
-		let cfg = Arc::new(SessionConfig{
+		let cfg = Arc::new(SessionConfig {
 			soft_timeout: Duration::new(1, 0),
 			hard_timeout: Duration::new(2, 0),
 			session_timeout: Duration::new(3600, 0),
 		});
-		let recv_sock = tokio::net::TcpListener::bind(("127.0.0.1", 0u16)).await.unwrap();
+		let recv_sock = tokio::net::TcpListener::bind(("127.0.0.1", 0u16))
+			.await
+			.unwrap();
 		let local_addr = recv_sock.local_addr().unwrap();
 		let recv_sock = RecvSocket::new(recv_sock, cfg.clone());
 
 		let mut recv_ch = recv_sock.subscribe();
 
-		let mut data = metric::Readout{
+		let mut data = metric::Readout {
 			timestamp: Utc::now(),
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				instance: "/some/device".into(),
 				device_type: "magic".into(),
 			},
 			components: metric::OrderedVec::new(),
 		};
-		data.components.insert("foo".into(), metric::Value{
-			magnitude: 23.42,
-			unit: metric::Unit::Celsius,
-		});
+		data.components.insert(
+			"foo".into(),
+			metric::Value {
+				magnitude: 23.42,
+				unit: metric::Unit::Celsius,
+			},
+		);
 
 		let send_sock = SendSocket::new(local_addr);
-		send_sock.send(frame::DataFrame::Readout(vec![Arc::new(data.clone())].into())).await;
+		send_sock
+			.send(frame::DataFrame::Readout(
+				vec![Arc::new(data.clone())].into(),
+			))
+			.await;
 
 		let received = recv_ch.recv().await;
 		match received {
 			Ok(frame::DataFrame::Readout(readout)) => {
 				assert_eq!(*readout[0], data);
-			},
+			}
 			other => panic!("unexpected reception: {:?}", other),
 		}
 	}

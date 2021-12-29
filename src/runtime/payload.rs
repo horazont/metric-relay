@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use crate::metric;
+use std::sync::Arc;
 
 pub type Readout = Arc<metric::Readout>;
 pub type Sample = Vec<Arc<metric::Readout>>;

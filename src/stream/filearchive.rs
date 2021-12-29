@@ -10,7 +10,7 @@ use openat;
 
 use crate::metric;
 
-use super::archive::{ArchiveWrite, ArchiveError};
+use super::archive::{ArchiveError, ArchiveWrite};
 
 const TO_ESCAPE: &AsciiSet = &CONTROLS.add(b'/');
 
@@ -20,7 +20,11 @@ pub struct SimpleFileArchive {
 	filemode: u32,
 }
 
-fn open_create_dir<P: AsRef<Path>>(parent: &openat::Dir, name: P, mode: u32) -> io::Result<openat::Dir> {
+fn open_create_dir<P: AsRef<Path>>(
+	parent: &openat::Dir,
+	name: P,
+	mode: u32,
+) -> io::Result<openat::Dir> {
 	let name = name.as_ref();
 	match parent.create_dir(name, mode) {
 		Ok(_) => (),
@@ -32,7 +36,7 @@ fn open_create_dir<P: AsRef<Path>>(parent: &openat::Dir, name: P, mode: u32) -> 
 
 impl SimpleFileArchive {
 	pub fn new(inner: openat::Dir, mode: u32) -> Self {
-		Self{
+		Self {
 			root: inner,
 			dirmode: mode | 0o111,
 			filemode: mode,
@@ -42,11 +46,15 @@ impl SimpleFileArchive {
 
 impl ArchiveWrite for SimpleFileArchive {
 	fn write(&mut self, block: &metric::StreamBlock) -> Result<(), ArchiveError> {
-		let device_dir: Cow<'_, str> = utf8_percent_encode(&block.path.device_type, TO_ESCAPE).into();
+		let device_dir: Cow<'_, str> =
+			utf8_percent_encode(&block.path.device_type, TO_ESCAPE).into();
 		let device_dir = open_create_dir(&self.root, &*device_dir, self.dirmode)?;
-		let instance_dir: Cow<'_, str> = utf8_percent_encode(&block.path.instance, TO_ESCAPE).into();
+		let instance_dir: Cow<'_, str> =
+			utf8_percent_encode(&block.path.instance, TO_ESCAPE).into();
 		let instance_dir = open_create_dir(&device_dir, &*instance_dir, self.dirmode)?;
-		let filename = block.t0.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+		let filename = block
+			.t0
+			.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
 		let mut f = instance_dir.write_file(filename, self.filemode)?;
 		f.write_u8(0)?;
 		f.write_i64::<LittleEndian>(block.t0.timestamp())?;

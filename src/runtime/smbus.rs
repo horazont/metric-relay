@@ -6,9 +6,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use log::{warn, debug, trace};
+use log::{debug, trace, warn};
 
-use smartstring::alias::{String as SmartString};
+use smartstring::alias::String as SmartString;
 
 use chrono::Utc;
 
@@ -21,8 +21,7 @@ use crate::bme280;
 use crate::metric;
 
 use super::payload;
-use super::traits::{Source, null_receiver};
-
+use super::traits::{null_receiver, Source};
 
 pub struct BME280Worker {
 	bus: Arc<Mutex<I2c<File>>>,
@@ -64,8 +63,14 @@ const CTRL_MEAS: u8 =
 ;
 
 impl BME280Worker {
-	pub fn spawn(bus: I2c<File>, instance: SmartString, interval: Duration, reconfigure_each: usize, sink: broadcast::Sender<payload::Sample>) {
-		let mut worker = Self{
+	pub fn spawn(
+		bus: I2c<File>,
+		instance: SmartString,
+		interval: Duration,
+		reconfigure_each: usize,
+		sink: broadcast::Sender<payload::Sample>,
+	) {
+		let mut worker = Self {
 			bus: Arc::new(Mutex::new(bus)),
 			interval,
 			instance: Arc::new(instance),
@@ -74,9 +79,7 @@ impl BME280Worker {
 			calibration: None,
 			sink,
 		};
-		tokio::spawn(async move {
-			worker.run().await
-		});
+		tokio::spawn(async move { worker.run().await });
 	}
 
 	fn verified_write<T: AsRawFd>(bus: &mut I2c<T>, reg: u8, data: u8) -> io::Result<()> {
@@ -84,7 +87,13 @@ impl BME280Worker {
 		bus.smbus_write_byte_data(reg, data)?;
 		let readback = bus.smbus_read_byte_data(reg)?;
 		if readback != data {
-			Err(io::Error::new(io::ErrorKind::InvalidData, format!("readback on verified write returned different data: 0x{:x} != 0x{:x}", readback, data)))
+			Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				format!(
+					"readback on verified write returned different data: 0x{:x} != 0x{:x}",
+					readback, data
+				),
+			))
 		} else {
 			Ok(())
 		}
@@ -94,10 +103,16 @@ impl BME280Worker {
 		let id = bus.smbus_read_byte_data(REG_ID)?;
 		trace!("device identified as 0x{:x}", id);
 		if id != ID {
-			return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid response to ID command"));
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				"invalid response to ID command",
+			));
 		}
 
-		debug!("configuring with 0x{:x} 0x{:x} 0x{:x}", CONFIG, CTRL_MEAS, CTRL_HUM);
+		debug!(
+			"configuring with 0x{:x} 0x{:x} 0x{:x}",
+			CONFIG, CTRL_MEAS, CTRL_HUM
+		);
 		Self::verified_write(bus, REG_CONFIG, CONFIG)?;
 		Self::verified_write(bus, REG_CTRL_MEAS, CTRL_MEAS)?;
 		Self::verified_write(bus, REG_CTRL_HUM, CTRL_HUM)?;
@@ -112,10 +127,7 @@ impl BME280Worker {
 		bus.i2c_read_block_data(REG_DIGE1, &mut dige1_buf[..])?;
 
 		trace!("parsing calibration data");
-		let calibration = bme280::CalibrationData::from_registers(
-			&dig88_buf[..],
-			&dige1_buf[..],
-		);
+		let calibration = bme280::CalibrationData::from_registers(&dig88_buf[..], &dige1_buf[..]);
 
 		trace!("calibration: {:?}", calibration);
 		Ok(calibration)
@@ -126,13 +138,22 @@ impl BME280Worker {
 		match spawn_blocking(move || {
 			let mut bus = bus.lock().unwrap();
 			Self::reconfigure_blocking(&mut bus)
-		}).await {
+		})
+		.await
+		{
 			Ok(v) => v,
-			Err(e) => Err(io::Error::new(io::ErrorKind::Other, format!("configuration task panic'd: {}", e))),
+			Err(e) => Err(io::Error::new(
+				io::ErrorKind::Other,
+				format!("configuration task panic'd: {}", e),
+			)),
 		}
 	}
 
-	fn sample_blocking<T: AsRawFd>(bus: &mut I2c<T>, calibration: &bme280::CalibrationData, instance: &SmartString) -> io::Result<metric::Readout> {
+	fn sample_blocking<T: AsRawFd>(
+		bus: &mut I2c<T>,
+		calibration: &bme280::CalibrationData,
+		instance: &SmartString,
+	) -> io::Result<metric::Readout> {
 		let mut data_buf = [0u8; READOUT_SIZE];
 		bus.i2c_read_block_data(REG_DATA_START, &mut data_buf[..])?;
 		let timestamp = Utc::now();
@@ -141,25 +162,39 @@ impl BME280Worker {
 		drop(data_buf);
 		trace!("unpacked data: {:?}", readout);
 		let (temperature, pressure, humidity) = readout.decodef(calibration);
-		trace!("decoded data: {}°C {}Pa {}%rH", temperature, pressure, humidity);
+		trace!(
+			"decoded data: {}°C {}Pa {}%rH",
+			temperature,
+			pressure,
+			humidity
+		);
 
 		let mut components = metric::OrderedVec::new();
-		components.insert(bme280::HUMIDITY_COMPONENT.into(), metric::Value{
-			magnitude: humidity,
-			unit: metric::Unit::Percent,
-		});
-		components.insert(bme280::PRESSURE_COMPONENT.into(), metric::Value{
-			magnitude: pressure,
-			unit: metric::Unit::Pascal,
-		});
-		components.insert(bme280::TEMPERATURE_COMPONENT.into(), metric::Value{
-			magnitude: temperature,
-			unit: metric::Unit::Celsius,
-		});
+		components.insert(
+			bme280::HUMIDITY_COMPONENT.into(),
+			metric::Value {
+				magnitude: humidity,
+				unit: metric::Unit::Percent,
+			},
+		);
+		components.insert(
+			bme280::PRESSURE_COMPONENT.into(),
+			metric::Value {
+				magnitude: pressure,
+				unit: metric::Unit::Pascal,
+			},
+		);
+		components.insert(
+			bme280::TEMPERATURE_COMPONENT.into(),
+			metric::Value {
+				magnitude: temperature,
+				unit: metric::Unit::Celsius,
+			},
+		);
 
-		Ok(metric::Readout{
+		Ok(metric::Readout {
 			timestamp,
-			path: metric::DevicePath{
+			path: metric::DevicePath {
 				device_type: "bme280".into(),
 				instance: instance.clone(),
 			},
@@ -174,9 +209,14 @@ impl BME280Worker {
 		match spawn_blocking(move || {
 			let mut bus = bus.lock().unwrap();
 			Self::sample_blocking(&mut bus, &calibration, &instance)
-		}).await {
+		})
+		.await
+		{
 			Ok(v) => v,
-			Err(e) => Err(io::Error::new(io::ErrorKind::Other, format!("sample task panic'd: {}", e))),
+			Err(e) => Err(io::Error::new(
+				io::ErrorKind::Other,
+				format!("sample task panic'd: {}", e),
+			)),
 		}
 	}
 
@@ -188,7 +228,10 @@ impl BME280Worker {
 				self.calibration = match self.reconfigure().await {
 					Ok(v) => Some(Arc::new(v)),
 					Err(e) => {
-						warn!("failed to reconfigure BME280 ({}), re-trying in {:?}", e, self.backoff);
+						warn!(
+							"failed to reconfigure BME280 ({}), re-trying in {:?}",
+							e, self.backoff
+						);
 						tokio::time::sleep(self.backoff).await;
 						continue;
 					}
@@ -202,13 +245,19 @@ impl BME280Worker {
 				trace!("sleeping {:?} before next sample", sleep_time);
 				tokio::time::sleep(sleep_time).await;
 			} else {
-				trace!("I am a bit late for taking the sample ({:?})", now.checked_duration_since(next_sample).unwrap());
+				trace!(
+					"I am a bit late for taking the sample ({:?})",
+					now.checked_duration_since(next_sample).unwrap()
+				);
 			}
 
 			let readout = match self.sample().await {
 				Ok(v) => v,
 				Err(e) => {
-					warn!("failed to read BME280 sample: {}; will attempt reconfiguration next", e);
+					warn!(
+						"failed to read BME280 sample: {}; will attempt reconfiguration next",
+						e
+					);
 					reconfigure_ctr = self.reconfigure_each;
 					continue;
 				}
@@ -231,9 +280,13 @@ impl BME280Worker {
 				Some(tardiness) => {
 					trace!("using fallback instant {:?} instead of accurate {:?}, because at {:?} I am already late by {:?}", fallback_next_sample, accurate_next_sample, now, tardiness);
 					fallback_next_sample
-				},
+				}
 				None => {
-					trace!("using accurate next sample timestamp {:?} because at {:?} I am on time", accurate_next_sample, now);
+					trace!(
+						"using accurate next sample timestamp {:?} because at {:?} I am on time",
+						accurate_next_sample,
+						now
+					);
 					accurate_next_sample
 				}
 			};
@@ -247,7 +300,13 @@ pub struct BME280 {
 }
 
 impl BME280 {
-	pub fn new<P: AsRef<Path>>(bus_device: P, address: u8, path_prefix: String, interval: Duration, reconfigure_each: usize) -> io::Result<BME280> {
+	pub fn new<P: AsRef<Path>>(
+		bus_device: P,
+		address: u8,
+		path_prefix: String,
+		interval: Duration,
+		reconfigure_each: usize,
+	) -> io::Result<BME280> {
 		let bus_device = bus_device.as_ref();
 		let mut bus = I2c::from_path(bus_device)?;
 		bus.smbus_set_slave_address(address as u16, false)?;
@@ -257,16 +316,8 @@ impl BME280 {
 		instance.push_str(bus_device.file_name().unwrap().to_string_lossy().as_ref());
 		write!(instance, "/{:x}", address).unwrap();
 		let (zygote, _) = broadcast::channel(8);
-		BME280Worker::spawn(
-			bus,
-			instance,
-			interval,
-			reconfigure_each,
-			zygote.clone(),
-		);
-		Ok(Self{
-			zygote,
-		})
+		BME280Worker::spawn(bus, instance, interval, reconfigure_each, zygote.clone());
+		Ok(Self { zygote })
 	}
 }
 

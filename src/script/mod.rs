@@ -5,8 +5,8 @@ mod context;
 mod func;
 mod result;
 
-pub use result::{EvalResult, EvalError, CompileResult, CompileError};
-pub use context::{Evaluate, Context, Namespace, BoxCow};
+pub use context::{BoxCow, Context, Evaluate, Namespace};
+pub use result::{CompileError, CompileResult, EvalError, EvalResult};
 
 #[derive(Debug)]
 struct Constant(f64);
@@ -131,7 +131,7 @@ impl Evaluate for Ref {
 	}
 }
 
-struct TokenIter<'x>{
+struct TokenIter<'x> {
 	s: &'x str,
 }
 
@@ -145,7 +145,7 @@ impl<'x> Iterator for TokenIter<'x> {
 			None => self.s,
 		};
 		if self.s.len() == 0 {
-			return None
+			return None;
 		}
 
 		let (token, remainder) = match self.s.find(&[' ', '\t', '\n', '\r'][..]) {
@@ -187,11 +187,13 @@ fn parse_token(s: &str) -> CompileResult<Token> {
 			Ok(v) => Ok(Token::Number(v)),
 			Err(_) => Err(CompileError::InvalidToken(s.into())),
 		},
-		'!' => if s.len() > 1 {
-			Ok(Token::FunctionCall(s[1..].into()))
-		} else {
-			Err(CompileError::InvalidToken(s.into()))
-		},
+		'!' => {
+			if s.len() > 1 {
+				Ok(Token::FunctionCall(s[1..].into()))
+			} else {
+				Err(CompileError::InvalidToken(s.into()))
+			}
+		}
 		'+' if s.len() == 1 => Ok(Token::Operation(Operator::Add)),
 		'-' if s.len() == 1 => Ok(Token::Operation(Operator::Sub)),
 		'-' => match s.parse::<f64>() {
@@ -209,102 +211,112 @@ impl FromStr for Box<dyn Evaluate> {
 	type Err = CompileError;
 
 	fn from_str(s: &str) -> CompileResult<Box<dyn Evaluate>> {
-		use Token::*;
 		use Operator::*;
+		use Token::*;
 
 		let mut stack = Vec::<Box<dyn Evaluate>>::new();
-		for token in (TokenIter{s}) {
+		for token in (TokenIter { s }) {
 			match parse_token(token)? {
 				Number(v) => stack.push(Box::new(Constant(v))),
-				Operation(Add) => if stack.len() < 2 {
-					return Err(CompileError::StackUnderflow)
-				} else {
-					let rhs = stack.pop().unwrap();
-					let lhs = stack.pop().unwrap();
-					stack.push(Box::new(AddOp{lhs, rhs}))
-				},
-				Operation(Mul) => if stack.len() < 2 {
-					return Err(CompileError::StackUnderflow)
-				} else {
-					let rhs = stack.pop().unwrap();
-					let lhs = stack.pop().unwrap();
-					stack.push(Box::new(MulOp{lhs, rhs}))
-				},
-				Operation(Sub) => if stack.len() < 2 {
-					return Err(CompileError::StackUnderflow)
-				} else {
-					let rhs = stack.pop().unwrap();
-					let lhs = stack.pop().unwrap();
-					stack.push(Box::new(SubOp{lhs, rhs}))
-				},
-				Operation(Div) => if stack.len() < 2 {
-					return Err(CompileError::StackUnderflow)
-				} else {
-					let rhs = stack.pop().unwrap();
-					let lhs = stack.pop().unwrap();
-					stack.push(Box::new(DivOp{lhs, rhs}))
-				},
-				Operation(Pow) => if stack.len() < 2 {
-					return Err(CompileError::StackUnderflow)
-				} else {
-					let rhs = stack.pop().unwrap();
-					let lhs = stack.pop().unwrap();
-					stack.push(Box::new(PowOp{lhs, rhs}))
-				},
+				Operation(Add) => {
+					if stack.len() < 2 {
+						return Err(CompileError::StackUnderflow);
+					} else {
+						let rhs = stack.pop().unwrap();
+						let lhs = stack.pop().unwrap();
+						stack.push(Box::new(AddOp { lhs, rhs }))
+					}
+				}
+				Operation(Mul) => {
+					if stack.len() < 2 {
+						return Err(CompileError::StackUnderflow);
+					} else {
+						let rhs = stack.pop().unwrap();
+						let lhs = stack.pop().unwrap();
+						stack.push(Box::new(MulOp { lhs, rhs }))
+					}
+				}
+				Operation(Sub) => {
+					if stack.len() < 2 {
+						return Err(CompileError::StackUnderflow);
+					} else {
+						let rhs = stack.pop().unwrap();
+						let lhs = stack.pop().unwrap();
+						stack.push(Box::new(SubOp { lhs, rhs }))
+					}
+				}
+				Operation(Div) => {
+					if stack.len() < 2 {
+						return Err(CompileError::StackUnderflow);
+					} else {
+						let rhs = stack.pop().unwrap();
+						let lhs = stack.pop().unwrap();
+						stack.push(Box::new(DivOp { lhs, rhs }))
+					}
+				}
+				Operation(Pow) => {
+					if stack.len() < 2 {
+						return Err(CompileError::StackUnderflow);
+					} else {
+						let rhs = stack.pop().unwrap();
+						let lhs = stack.pop().unwrap();
+						stack.push(Box::new(PowOp { lhs, rhs }))
+					}
+				}
 				Reference(name) => stack.push(Box::new(Ref(name))),
 				FunctionCall(name) => match &name[..] {
 					"heat_index" => {
 						if stack.len() < 2 {
-							return Err(CompileError::StackUnderflow)
+							return Err(CompileError::StackUnderflow);
 						} else {
 							let hum = stack.pop().unwrap();
 							let temp = stack.pop().unwrap();
-							stack.push(Box::new(func::F2Op{
+							stack.push(Box::new(func::F2Op {
 								p1: temp,
 								p2: hum,
 								f: func::heat_index_wrap,
 								label: "heat_index",
 							}))
 						}
-					},
+					}
 					"dewpoint" => {
 						if stack.len() < 2 {
-							return Err(CompileError::StackUnderflow)
+							return Err(CompileError::StackUnderflow);
 						} else {
 							let hum = stack.pop().unwrap();
 							let temp = stack.pop().unwrap();
-							stack.push(Box::new(func::F2Op{
+							stack.push(Box::new(func::F2Op {
 								p1: temp,
 								p2: hum,
 								f: func::dewpoint_wrap,
 								label: "dewpoint",
 							}))
 						}
-					},
+					}
 					"wet_bulb_temperature" => {
 						if stack.len() < 2 {
-							return Err(CompileError::StackUnderflow)
+							return Err(CompileError::StackUnderflow);
 						} else {
 							let hum = stack.pop().unwrap();
 							let temp = stack.pop().unwrap();
-							stack.push(Box::new(func::F2Op{
+							stack.push(Box::new(func::F2Op {
 								p1: temp,
 								p2: hum,
 								f: func::wet_bulb_temperature_wrap,
 								label: "wet_bulb_temperature",
 							}))
 						}
-					},
+					}
 					"barometric_correction" => {
 						if stack.len() < 5 {
-							return Err(CompileError::StackUnderflow)
+							return Err(CompileError::StackUnderflow);
 						} else {
 							let height = stack.pop().unwrap();
 							let g_0 = stack.pop().unwrap();
 							let humidity = stack.pop().unwrap();
 							let temperature = stack.pop().unwrap();
 							let pressure = stack.pop().unwrap();
-							stack.push(Box::new(func::BarometricCorrectionOp{
+							stack.push(Box::new(func::BarometricCorrectionOp {
 								pressure,
 								temperature,
 								humidity,
@@ -312,31 +324,31 @@ impl FromStr for Box<dyn Evaluate> {
 								height,
 							}))
 						}
-					},
+					}
 					"dB" => {
 						if stack.len() < 2 {
-							return Err(CompileError::StackUnderflow)
+							return Err(CompileError::StackUnderflow);
 						} else {
 							let limit = stack.pop().unwrap();
 							let value = stack.pop().unwrap();
-							stack.push(Box::new(func::F2Op{
+							stack.push(Box::new(func::F2Op {
 								p1: value,
 								p2: limit,
 								f: func::to_decibel,
 								label: "dB",
 							}))
 						}
-					},
+					}
 					_ => return Err(CompileError::UndeclaredFunction(name)),
-				}
+				},
 			}
 		}
 		if stack.len() > 1 {
-			return Err(CompileError::TooManyValues)
+			return Err(CompileError::TooManyValues);
 		}
 		match stack.pop() {
 			Some(v) => Ok(v),
-			None => Err(CompileError::StackUnderflow)
+			None => Err(CompileError::StackUnderflow),
 		}
 	}
 }
@@ -440,7 +452,7 @@ mod test_compile {
 		match expr.evaluate(&ctx) {
 			Err(EvalError::ValueNotFound(s)) => {
 				assert_eq!(s, "z");
-			},
+			}
 			other => panic!("unexpected result: {:?}", other),
 		}
 	}
@@ -454,6 +466,9 @@ mod test_compile {
 		ns.insert("r", 3f64);
 		let expr = s.parse::<Box<dyn Evaluate>>().unwrap();
 		let ctx = Context::new(BoxCow::<'_, dyn Namespace>::wrap_ref(&ns));
-		assert_eq!(expr.evaluate(&ctx).unwrap(), 10f64 * 20f64 * 3.14159 * 3f64 * 3f64);
+		assert_eq!(
+			expr.evaluate(&ctx).unwrap(),
+			10f64 * 20f64 * 3.14159 * 3f64 * 3f64
+		);
 	}
 }

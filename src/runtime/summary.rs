@@ -1,19 +1,18 @@
 use std::sync::Arc;
 
-use log::{warn, debug};
+use log::{debug, warn};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::spawn_blocking;
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 
 use crate::metric;
 
 use super::adapter::Serializer;
 use super::payload;
-use super::traits::{Source, Sink, null_receiver};
-
+use super::traits::{null_receiver, Sink, Source};
 
 struct SummaryWorker {
 	size: usize,
@@ -23,22 +22,20 @@ struct SummaryWorker {
 
 impl SummaryWorker {
 	pub fn spawn(
-			size: usize,
-			source: mpsc::Receiver<payload::Stream>,
-			sink: broadcast::Sender<payload::Sample>,
-			)
-	{
-		let mut worker = Self{
-			size,
-			source,
-			sink,
-		};
-		tokio::spawn(async move {
-			worker.run().await
-		});
+		size: usize,
+		source: mpsc::Receiver<payload::Stream>,
+		sink: broadcast::Sender<payload::Sample>,
+	) {
+		let mut worker = Self { size, source, sink };
+		tokio::spawn(async move { worker.run().await });
 	}
 
-	fn process_chunk(t: DateTime<Utc>, path: &metric::DevicePath, chunk: &[i16], scale: &metric::Value) -> payload::Readout {
+	fn process_chunk(
+		t: DateTime<Utc>,
+		path: &metric::DevicePath,
+		chunk: &[i16],
+		scale: &metric::Value,
+	) -> payload::Readout {
 		let mut sum = 0.0f64;
 		let mut min = 1.0f64 / 0.0;
 		let mut max = -1.0f64 / 0.0;
@@ -54,17 +51,47 @@ impl SummaryWorker {
 		let sq_avg = sq_sum / lenf;
 		let rms = sq_avg.sqrt();
 		let avg = sum / lenf;
-		let variance = sq_avg - avg*avg;
+		let variance = sq_avg - avg * avg;
 		let stddev = variance.sqrt();
 
 		let mut components = metric::OrderedVec::with_capacity(5);
-		components.insert("min".into(), metric::Value{unit: scale.unit.clone(), magnitude: min});
-		components.insert("max".into(), metric::Value{unit: scale.unit.clone(), magnitude: max});
-		components.insert("avg".into(), metric::Value{unit: scale.unit.clone(), magnitude: avg});
-		components.insert("rms".into(), metric::Value{unit: scale.unit.clone(), magnitude: rms});
-		components.insert("stddev".into(), metric::Value{unit: scale.unit.clone(), magnitude: stddev});
+		components.insert(
+			"min".into(),
+			metric::Value {
+				unit: scale.unit.clone(),
+				magnitude: min,
+			},
+		);
+		components.insert(
+			"max".into(),
+			metric::Value {
+				unit: scale.unit.clone(),
+				magnitude: max,
+			},
+		);
+		components.insert(
+			"avg".into(),
+			metric::Value {
+				unit: scale.unit.clone(),
+				magnitude: avg,
+			},
+		);
+		components.insert(
+			"rms".into(),
+			metric::Value {
+				unit: scale.unit.clone(),
+				magnitude: rms,
+			},
+		);
+		components.insert(
+			"stddev".into(),
+			metric::Value {
+				unit: scale.unit.clone(),
+				magnitude: stddev,
+			},
+		);
 
-		Arc::new(metric::Readout{
+		Arc::new(metric::Readout {
 			timestamp: t,
 			path: path.clone(),
 			components,
@@ -83,14 +110,19 @@ impl SummaryWorker {
 					let t = block.t0 + (period * (i * size) as i32);
 					buffer.extend(chunk);
 					if buffer.len() > 0 {
-						readouts.push(Self::process_chunk(t, &block.path, &buffer[..], &block.scale));
+						readouts.push(Self::process_chunk(
+							t,
+							&block.path,
+							&buffer[..],
+							&block.scale,
+						));
 					}
 				}
-			},
+			}
 		}
 
 		if readouts.len() == 0 {
-			return
+			return;
 		}
 
 		match sink.send(readouts) {
@@ -113,20 +145,17 @@ impl SummaryWorker {
 
 			let size = self.size;
 			let sink = self.sink.clone();
-			let result = spawn_blocking(move || {
-				Self::process(size, block, sink)
-			}).await;
+			let result = spawn_blocking(move || Self::process(size, block, sink)).await;
 			match result {
 				Ok(_) => (),
 				Err(e) => {
 					warn!("summary task crashed: {}. data lost.", e);
 					continue;
-				},
+				}
 			}
 		}
 	}
 }
-
 
 pub struct Summary {
 	serializer: Serializer<payload::Stream>,
@@ -137,15 +166,8 @@ impl Summary {
 	pub fn new(size: usize) -> Self {
 		let (zygote, _) = broadcast::channel(128);
 		let (serializer, source) = Serializer::new(8);
-		SummaryWorker::spawn(
-			size,
-			source,
-			zygote.clone(),
-		);
-		Self{
-			serializer,
-			zygote,
-		}
+		SummaryWorker::spawn(size, source, zygote.clone());
+		Self { serializer, zygote }
 	}
 }
 

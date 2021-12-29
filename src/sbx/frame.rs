@@ -1,6 +1,6 @@
-use std::convert::TryInto;
-use std::io::{Result as StdIoResult, Error as StdIoError, ErrorKind as StdIoErrorKind};
 use bytes::{Buf, BufMut, Bytes};
+use std::convert::TryInto;
+use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind, Result as StdIoResult};
 
 use num_enum::TryFromPrimitive;
 
@@ -22,7 +22,10 @@ impl EspMessageHeader {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for ESP8266 header"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for ESP8266 header",
+			));
 		}
 
 		let timestamp = r.get_u32_le();
@@ -31,15 +34,15 @@ impl EspMessageHeader {
 			Err(e) => return Err(StdIoError::new(StdIoErrorKind::InvalidData, e)),
 		};
 
-		Ok(Self{
-			timestamp,
-			type_,
-		})
+		Ok(Self { timestamp, type_ })
 	}
 
 	pub fn write<W: BufMut>(&self, w: &mut W) -> StdIoResult<()> {
 		if w.remaining_mut() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for ESP8266 header"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for ESP8266 header",
+			));
 		}
 
 		w.put_u32_le(self.timestamp);
@@ -65,7 +68,10 @@ impl EspStatus {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for ESP8266 status report"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for ESP8266 status report",
+			));
 		}
 
 		let tx_sent = r.get_u32_le();
@@ -77,7 +83,7 @@ impl EspStatus {
 		let tx_queue_overrun = r.get_u32_le();
 		let tx_acklocks_needed = r.get_u32_le();
 
-		Ok(Self{
+		Ok(Self {
 			tx_sent,
 			tx_dropped,
 			tx_oom_dropped,
@@ -89,7 +95,6 @@ impl EspStatus {
 		})
 	}
 }
-
 
 #[repr(u8)]
 #[derive(TryFromPrimitive, Copy, Clone, Debug)]
@@ -117,7 +122,10 @@ impl SbxMessageType {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for SBX message type"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for SBX message type",
+			));
 		}
 		match r.get_u8().try_into() {
 			Ok(v) => Ok(v),
@@ -140,7 +148,10 @@ impl DS18B20Sample {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for DS18B20 sample"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for DS18B20 sample",
+			));
 		}
 
 		let mut id = [0u8; 8];
@@ -149,7 +160,7 @@ impl DS18B20Sample {
 		}
 		let raw_value = r.get_i16_le();
 
-		Ok(Self{
+		Ok(Self {
 			id: DS18B20Id(id),
 			raw_value,
 		})
@@ -167,7 +178,10 @@ impl SbxDS18B20Message {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_BASE_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for sample timestamp"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for sample timestamp",
+			));
 		}
 
 		let timestamp = r.get_u16_le();
@@ -180,10 +194,7 @@ impl SbxDS18B20Message {
 			samples.push(DS18B20Sample::read(r)?);
 		}
 
-		Ok(Self{
-			timestamp,
-			samples,
-		})
+		Ok(Self { timestamp, samples })
 	}
 }
 
@@ -198,7 +209,10 @@ impl LightSample {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for light sample"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for light sample",
+			));
 		}
 
 		let timestamp = r.get_u16_le();
@@ -207,10 +221,7 @@ impl LightSample {
 			*v = r.get_u16_le();
 		}
 
-		Ok(Self{
-			timestamp,
-			ch,
-		})
+		Ok(Self { timestamp, ch })
 	}
 }
 
@@ -224,7 +235,10 @@ impl SbxLightMessage {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for light message"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for light message",
+			));
 		}
 
 		let mut samples = [LightSample::default(); 6];
@@ -232,9 +246,7 @@ impl SbxLightMessage {
 			*v = LightSample::read(r)?;
 		}
 
-		Ok(Self{
-			samples,
-		})
+		Ok(Self { samples })
 	}
 }
 
@@ -250,14 +262,17 @@ impl SbxIMUStreamState {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for IMU stream state"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for IMU stream state",
+			));
 		}
 
 		let sequence_number = r.get_u16_le();
 		let timestamp = r.get_u16_le();
 		let period = r.get_u16_le();
 
-		Ok(Self{
+		Ok(Self {
 			sequence_number,
 			timestamp,
 			period,
@@ -275,12 +290,15 @@ impl SbxI2CMetrics {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for I2C metrics"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for I2C metrics",
+			));
 		}
 
 		let transaction_overruns = r.get_u16_le();
 
-		Ok(Self{
+		Ok(Self {
 			transaction_overruns,
 		})
 	}
@@ -297,13 +315,16 @@ impl SbxBME280Metrics {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for BME280 metrics"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for BME280 metrics",
+			));
 		}
 
 		let configure_status = r.get_u8();
 		let timeouts = r.get_u16_le();
 
-		Ok(Self{
+		Ok(Self {
 			configure_status,
 			timeouts,
 		})
@@ -323,7 +344,10 @@ impl SbxTxBufferMetrics {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for SBX TX buffer metrics"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for SBX TX buffer metrics",
+			));
 		}
 
 		let most_allocated = r.get_u16_le();
@@ -331,7 +355,7 @@ impl SbxTxBufferMetrics {
 		let ready = r.get_u16_le();
 		let total = r.get_u16_le();
 
-		Ok(Self{
+		Ok(Self {
 			most_allocated,
 			allocated,
 			ready,
@@ -351,8 +375,7 @@ pub struct SbxStatusMessage {
 }
 
 impl SbxStatusMessage {
-	pub const RAW_LEN: usize =
-		std::mem::size_of::<u32>() +
+	pub const RAW_LEN: usize = std::mem::size_of::<u32>() +
 		std::mem::size_of::<u16>() +
 		std::mem::size_of::<u8>() +
 		std::mem::size_of::<u8>() + // status message version
@@ -364,7 +387,10 @@ impl SbxStatusMessage {
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for SBX status message"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for SBX status message",
+			));
 		}
 
 		// skip the RTC -- it is not set anymore
@@ -373,29 +399,26 @@ impl SbxStatusMessage {
 		let protocol_version = r.get_u8();
 
 		if protocol_version != 0x01 {
-			return Err(StdIoError::new(StdIoErrorKind::InvalidData, "unsupported protocol version"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::InvalidData,
+				"unsupported protocol version",
+			));
 		}
 
 		let status_version = r.get_u8();
 
 		if status_version != 0x06 {
-			return Err(StdIoError::new(StdIoErrorKind::InvalidData, "unsupported status version"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::InvalidData,
+				"unsupported status version",
+			));
 		}
 
-		let imu_streams = [
-			SbxIMUStreamState::read(r)?,
-			SbxIMUStreamState::read(r)?,
-		];
+		let imu_streams = [SbxIMUStreamState::read(r)?, SbxIMUStreamState::read(r)?];
 
-		let i2c_metrics = [
-			SbxI2CMetrics::read(r)?,
-			SbxI2CMetrics::read(r)?,
-		];
+		let i2c_metrics = [SbxI2CMetrics::read(r)?, SbxI2CMetrics::read(r)?];
 
-		let bme280_metrics = [
-			SbxBME280Metrics::read(r)?,
-			SbxBME280Metrics::read(r)?,
-		];
+		let bme280_metrics = [SbxBME280Metrics::read(r)?, SbxBME280Metrics::read(r)?];
 
 		let tx_buffer_metrics = SbxTxBufferMetrics::read(r)?;
 
@@ -404,7 +427,7 @@ impl SbxStatusMessage {
 			*v = r.get_u16_le();
 		}
 
-		Ok(Self{
+		Ok(Self {
 			uptime,
 			imu_streams,
 			i2c_metrics,
@@ -425,14 +448,16 @@ pub struct SbxBME280Message {
 }
 
 impl SbxBME280Message {
-	pub const RAW_LEN: usize =
-		std::mem::size_of::<u16>() +
-		std::mem::size_of::<u8>() +
-		std::mem::size_of::<u8>() * (26 + 7 + 8);
+	pub const RAW_LEN: usize = std::mem::size_of::<u16>()
+		+ std::mem::size_of::<u8>()
+		+ std::mem::size_of::<u8>() * (26 + 7 + 8);
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for BME280 message"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for BME280 message",
+			));
 		}
 
 		let timestamp = r.get_u16_le();
@@ -446,7 +471,7 @@ impl SbxBME280Message {
 		let mut readout = [0u8; 8];
 		r.copy_to_slice(&mut readout[..]);
 
-		Ok(Self{
+		Ok(Self {
 			timestamp,
 			instance,
 			dig88,
@@ -465,15 +490,17 @@ pub struct SbxNoiseReadout {
 }
 
 impl SbxNoiseReadout {
-	pub const RAW_LEN: usize =
-		std::mem::size_of::<u16>() +
-		std::mem::size_of::<u32>() +
-		std::mem::size_of::<i16>() +
-		std::mem::size_of::<i16>();
+	pub const RAW_LEN: usize = std::mem::size_of::<u16>()
+		+ std::mem::size_of::<u32>()
+		+ std::mem::size_of::<i16>()
+		+ std::mem::size_of::<i16>();
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for noise readout"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for noise readout",
+			));
 		}
 
 		let timestamp = r.get_u16_le();
@@ -481,14 +508,13 @@ impl SbxNoiseReadout {
 		let min = r.get_i16_le();
 		let max = r.get_i16_le();
 
-		Ok(Self{
+		Ok(Self {
 			timestamp,
 			sqavg,
 			min,
 			max,
 		})
 	}
-
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -498,13 +524,14 @@ pub struct SbxNoiseMessage {
 }
 
 impl SbxNoiseMessage {
-	pub const RAW_LEN: usize =
-		std::mem::size_of::<u8>() +
-		SbxNoiseReadout::RAW_LEN * 12;
+	pub const RAW_LEN: usize = std::mem::size_of::<u8>() + SbxNoiseReadout::RAW_LEN * 12;
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for noise message"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for noise message",
+			));
 		}
 
 		let factor = r.get_u8();
@@ -513,10 +540,7 @@ impl SbxNoiseMessage {
 			*v = SbxNoiseReadout::read(r)?;
 		}
 
-		Ok(Self{
-			factor,
-			samples,
-		})
+		Ok(Self { factor, samples })
 	}
 }
 
@@ -528,23 +552,20 @@ pub struct SbxStreamMessage {
 }
 
 impl SbxStreamMessage {
-	pub const RAW_BASE_LEN: usize =
-		std::mem::size_of::<u16>() +
-		std::mem::size_of::<u16>();
+	pub const RAW_BASE_LEN: usize = std::mem::size_of::<u16>() + std::mem::size_of::<u16>();
 
 	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
 		if r.remaining() < Self::RAW_BASE_LEN {
-			return Err(StdIoError::new(StdIoErrorKind::UnexpectedEof, "not enough bytes for stream message"))
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for stream message",
+			));
 		}
 
 		let seq = r.get_u16_le();
 		let avg = r.get_u16_le();
 		let coded = r.copy_to_bytes(r.remaining());
 
-		Ok(Self{
-			seq,
-			avg,
-			coded,
-		})
+		Ok(Self { seq, avg, coded })
 	}
 }

@@ -3,7 +3,6 @@ use std::io;
 
 use crate::metric;
 
-
 #[derive(Debug)]
 pub enum ArchiveError {
 	IO(io::Error),

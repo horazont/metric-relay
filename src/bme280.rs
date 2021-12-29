@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use bytes::Buf;
 
-use byteorder::{ByteOrder, BigEndian};
+use byteorder::{BigEndian, ByteOrder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CalibrationData {
@@ -41,7 +41,7 @@ impl CalibrationData {
 		let H4 = (((H45_1 as u16) << 4) | ((H45_2 as u16) & 0xf)) as i16;
 		let H5 = (((H45_3 as u16) << 4) | ((H45_2 as u16) >> 4) & 0xf) as i16;
 
-		CalibrationData{
+		CalibrationData {
 			T1: dig88buf.get_u16_le(),
 			T2: dig88buf.get_i16_le(),
 			T3: dig88buf.get_i16_le(),
@@ -77,17 +77,23 @@ pub struct Readout {
 impl Readout {
 	pub fn from_registers(readout: &[u8]) -> Readout {
 		assert!(readout.len() >= 8);
-		Readout{
-			pressure: ((((readout[0] as u32) << 16) | ((readout[1] as u32) << 8) | (readout[2] as u32)) >> 4) as i32,
-			temp: ((((readout[3] as u32) << 16) | ((readout[4] as u32) << 8) | (readout[5] as u32)) >> 4) as i32,
+		Readout {
+			pressure: ((((readout[0] as u32) << 16)
+				| ((readout[1] as u32) << 8)
+				| (readout[2] as u32))
+				>> 4) as i32,
+			temp: ((((readout[3] as u32) << 16) | ((readout[4] as u32) << 8) | (readout[5] as u32))
+				>> 4) as i32,
 			humidity: BigEndian::read_u16(&readout[6..8]) as i32,
 		}
 	}
 
 	/// Decode a helper value for the temperature
 	fn get_temp_fine(&self, c: &CalibrationData) -> i32 {
-		let var1: i32 = ((((self.temp >> 3) - ((c.T1 as i32) << 1))) * (c.T2 as i32)) >> 11;
-		let var2: i32 = (((((self.temp >> 4) - (c.T1 as i32)) * ((self.temp >> 4) - (c.T1 as i32))) >> 12) * (c.T3 as i32)) >> 14;
+		let var1: i32 = (((self.temp >> 3) - ((c.T1 as i32) << 1)) * (c.T2 as i32)) >> 11;
+		let var2: i32 =
+			(((((self.temp >> 4) - (c.T1 as i32)) * ((self.temp >> 4) - (c.T1 as i32))) >> 12)
+				* (c.T3 as i32)) >> 14;
 		var1 + var2
 	}
 
@@ -97,27 +103,33 @@ impl Readout {
 	}
 
 	fn get_pressure(&self, c: &CalibrationData, t_fine: i32) -> u32 {
-		let var1: i64 = ((t_fine as i64)) - 128000;
+		let var1: i64 = (t_fine as i64) - 128000;
 		let var2: i64 = var1 * var1 * (c.P6 as i64);
-		let var2: i64 = var2 + ((var1*(c.P5 as i64))<<17);
-		let var2: i64 = var2 + (((c.P4 as i64))<<35);
-		let var1: i64 = ((var1 * var1 * (c.P3 as i64))>>8) + ((var1 * (c.P2 as i64))<<12);
-		let var1: i64 = (((((1 as i64))<<47)+var1))*((c.P1 as i64))>>33;
+		let var2: i64 = var2 + ((var1 * (c.P5 as i64)) << 17);
+		let var2: i64 = var2 + ((c.P4 as i64) << 35);
+		let var1: i64 = ((var1 * var1 * (c.P3 as i64)) >> 8) + ((var1 * (c.P2 as i64)) << 12);
+		let var1: i64 = (((1 as i64) << 47) + var1) * (c.P1 as i64) >> 33;
 		if var1 == 0 {
 			return 0;
 		}
-		let p: i64 = 1048576-(self.pressure as i64);
-		let p: i64 = (((p<<31)-var2)*3125)/var1;
-		let var1: i64 = (((c.P9 as i64)) * (p>>13) * (p>>13)) >> 25;
-		let var2: i64 = (((c.P8 as i64)) * p) >> 19;
-		let p: i64 = ((p + var1 + var2) >> 8) + (((c.P7 as i64))<<4);
+		let p: i64 = 1048576 - (self.pressure as i64);
+		let p: i64 = (((p << 31) - var2) * 3125) / var1;
+		let var1: i64 = ((c.P9 as i64) * (p >> 13) * (p >> 13)) >> 25;
+		let var2: i64 = ((c.P8 as i64) * p) >> 19;
+		let p: i64 = ((p + var1 + var2) >> 8) + ((c.P7 as i64) << 4);
 		p as u32
 	}
 
 	fn get_humidity(&self, c: &CalibrationData, t_fine: i32) -> u32 {
-		let v: i32 = t_fine - ((76800 as i32));
-		let v: i32 = ((((self.humidity << 14) - (((c.H4 as i32)) << 20) - (((c.H5 as i32)) * v)) + ((16384 as i32))) >> 15) * (((((((v * ((c.H6 as i32))) >> 10) * (((v * ((c.H3 as i32))) >> 11) + ((32768 as i32)))) >> 10) + ((2097152 as i32))) * ((c.H2 as i32)) + 8192) >> 14);
-		let v: i32 = v - (((((v >> 15) * (v >> 15)) >> 7) * ((c.H1 as i32))) >> 4);
+		let v: i32 = t_fine - (76800 as i32);
+		let v: i32 = ((((self.humidity << 14) - ((c.H4 as i32) << 20) - ((c.H5 as i32) * v))
+			+ (16384 as i32))
+			>> 15) * (((((((v * (c.H6 as i32)) >> 10)
+			* (((v * (c.H3 as i32)) >> 11) + (32768 as i32)))
+			>> 10) + (2097152 as i32))
+			* (c.H2 as i32)
+			+ 8192) >> 14);
+		let v: i32 = v - (((((v >> 15) * (v >> 15)) >> 7) * (c.H1 as i32)) >> 4);
 		let v: i32 = if v < 0 { 0 } else { v };
 		let v: i32 = if v > 419430400 { 419430400 } else { v };
 		(v >> 12) as u32
@@ -145,11 +157,7 @@ impl Readout {
 	/// - humidity as %rH
 	pub fn decodef(&self, c: &CalibrationData) -> (f64, f64, f64) {
 		let (T, P, H) = self.decode(c);
-		(
-			(T as f64) / 100.0,
-			(P as f64) / 256.0,
-			(H as f64) / 1024.0,
-		)
+		((T as f64) / 100.0, (P as f64) / 256.0, (H as f64) / 1024.0)
 	}
 }
 

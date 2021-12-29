@@ -1,5 +1,5 @@
-use tokio;
 use std::net;
+use tokio;
 use tokio::net::UdpSocket;
 
 use metric_relay::snurl;
@@ -19,8 +19,18 @@ struct Opt {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let opt = Opt::from_args();
 
-	let raw_sock = UdpSocket::bind(net::SocketAddr::new("0.0.0.0".parse::<net::IpAddr>().unwrap(), opt.src_port)).await?;
-	let sock = snurl::Socket::new(raw_sock, net::SocketAddr::new("255.255.255.255".parse::<net::IpAddr>().unwrap(), opt.dst_port));
+	let raw_sock = UdpSocket::bind(net::SocketAddr::new(
+		"0.0.0.0".parse::<net::IpAddr>().unwrap(),
+		opt.src_port,
+	))
+	.await?;
+	let sock = snurl::Socket::new(
+		raw_sock,
+		net::SocketAddr::new(
+			"255.255.255.255".parse::<net::IpAddr>().unwrap(),
+			opt.dst_port,
+		),
+	);
 	let mut ep = snurl::Endpoint::new(sock);
 
 	loop {

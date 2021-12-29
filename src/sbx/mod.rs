@@ -1,34 +1,23 @@
-use std::convert::TryInto;
-use std::io::{Result as StdIoResult, Error as StdIoError, ErrorKind as StdIoErrorKind};
 use bytes::Buf;
+use std::convert::TryInto;
+use std::io::{Error as StdIoError, ErrorKind as StdIoErrorKind, Result as StdIoResult};
 
 mod frame;
-mod rtcifier;
 mod generators;
+mod rtcifier;
 mod stream;
 
 pub use frame::{
-	EspMessageHeader,
-	EspMessageType,
-	EspStatus,
-	SbxMessageType,
-	SbxDS18B20Message,
-	SbxLightMessage,
-	SbxStatusMessage,
-	SbxBME280Message,
-	SbxNoiseMessage,
-	SbxStreamMessage,
+	EspMessageHeader, EspMessageType, EspStatus, SbxBME280Message, SbxDS18B20Message,
+	SbxLightMessage, SbxMessageType, SbxNoiseMessage, SbxStatusMessage, SbxStreamMessage,
 };
 
-pub use rtcifier::{LinearRTC, RangeRTC, RTCifier};
-#[cfg(feature = "unstable-rtcs")]
-pub use rtcifier::{RangeRTCv2, RangeRTCLiori, FilteredRTC};
 pub use generators::ReadoutIterable;
+#[cfg(feature = "unstable-rtcs")]
+pub use rtcifier::{FilteredRTC, RangeRTCLiori, RangeRTCv2};
+pub use rtcifier::{LinearRTC, RTCifier, RangeRTC};
 
-pub use stream::{
-	StreamKind,
-	StreamDecoder,
-};
+pub use stream::{StreamDecoder, StreamKind};
 
 #[derive(Debug, Clone)]
 pub enum ReadoutMessage {
@@ -84,10 +73,7 @@ pub struct StreamMessage {
 impl StreamMessage {
 	pub fn build(msgtype: SbxMessageType, data: SbxStreamMessage) -> StreamMessage {
 		let kind: stream::StreamKind = msgtype.try_into().expect("stream message kind");
-		StreamMessage{
-			kind,
-			data,
-		}
+		StreamMessage { kind, data }
 	}
 }
 
@@ -134,10 +120,14 @@ impl Message {
 			SensorNoise => Ok(SbxNoiseMessage::read(r)?.into()),
 			SensorBME280 => Ok(SbxBME280Message::read(r)?.into()),
 			SensorLight => Ok(SbxLightMessage::read(r)?.into()),
-			SensorStreamAccelX | SensorStreamAccelY | SensorStreamAccelZ | SensorStreamCompassX | SensorStreamCompassY | SensorStreamCompassZ => {
+			SensorStreamAccelX | SensorStreamAccelY | SensorStreamAccelZ | SensorStreamCompassX
+			| SensorStreamCompassY | SensorStreamCompassZ => {
 				Ok(StreamMessage::build(type_, SbxStreamMessage::read(r)?).into())
 			}
-			_ => Err(StdIoError::new(StdIoErrorKind::InvalidData, "unsupported message type")),
+			_ => Err(StdIoError::new(
+				StdIoErrorKind::InvalidData,
+				"unsupported message type",
+			)),
 		}
 	}
 }
