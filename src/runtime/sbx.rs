@@ -30,7 +30,6 @@ pub struct SBXSource {
 
 struct SBXSourceWorker {
 	path_prefix: String,
-	ep: snurl::Endpoint,
 	sample_sink: broadcast::Sender<payload::Sample>,
 	#[allow(dead_code)]
 	stream_sink: broadcast::Sender<payload::Stream>,
@@ -41,7 +40,7 @@ struct SBXSourceWorker {
 }
 
 impl SBXSourceWorker {
-	pub fn spawn(
+	pub fn spawn_with_snurl(
 		ep: snurl::Endpoint,
 		path_prefix: String,
 		sample_sink: broadcast::Sender<payload::Sample>,
@@ -64,7 +63,6 @@ impl SBXSourceWorker {
 
 		let mut worker = Self{
 			path_prefix,
-			ep,
 			sample_sink,
 			stream_sink,
 			stop_ch,
@@ -79,8 +77,53 @@ impl SBXSourceWorker {
 			},
 			buffer: Vec::new(),
 		};
+		let ep = Box::new(ep);
 		tokio::spawn(async move {
-			worker.run().await;
+			worker.run_with_snurl(ep).await;
+		});
+	}
+
+	#[cfg(feature = "serial")]
+	pub fn spawn_with_serialstream(
+		src: tokio_serial::SerialStream,
+		path_prefix: String,
+		sample_sink: broadcast::Sender<payload::Sample>,
+		stream_sink: broadcast::Sender<payload::Stream>,
+		stop_ch: oneshot::Receiver<()>)
+	{
+		let accel_period = Duration::from_millis(5);
+		let accel_slice = ChronoDuration::seconds(60);
+		let accel_scale = metric::Value{
+			magnitude: 19.6133,
+			unit: metric::Unit::MeterPerSqSecond,
+		};
+
+		let compass_period = Duration::from_millis(320);
+		let compass_slice = ChronoDuration::seconds(64);
+		let compass_scale = metric::Value{
+			magnitude: 0.0002,
+			unit: metric::Unit::Tesla,
+		};
+
+		let mut worker = Self{
+			path_prefix,
+			sample_sink,
+			stream_sink,
+			stop_ch,
+			rtcifier: sbx::RangeRTC::default(),
+			stream_decoders: enum_map! {
+				sbx::StreamKind::AccelX => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
+				sbx::StreamKind::AccelY => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
+				sbx::StreamKind::AccelZ => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
+				sbx::StreamKind::CompassX => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
+				sbx::StreamKind::CompassY => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
+				sbx::StreamKind::CompassZ => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
+			},
+			buffer: Vec::new(),
+		};
+		let src = Box::new(src);
+		tokio::spawn(async move {
+			worker.run_with_serialstream(src).await;
 		});
 	}
 
@@ -188,9 +231,9 @@ impl SBXSourceWorker {
 		Ok(())
 	}
 
-	async fn process_one(&mut self) -> Result<(), ()> {
+	async fn process_one(&mut self, ep: &mut snurl::Endpoint) -> Result<(), ()> {
 		tokio::select! {
-			received = self.ep.recv_data() => {
+			received = ep.recv_data() => {
 				match received {
 					// the socket was closed somehow? not sure how that could happen, but we need to shutdown then
 					None => {
@@ -226,13 +269,17 @@ impl SBXSourceWorker {
 		}
 	}
 
-	async fn run(&mut self) {
+	async fn run_with_snurl(&mut self, mut ep: Box<snurl::Endpoint>) {
 		loop {
-			match self.process_one().await {
+			match self.process_one(&mut ep).await {
 				Ok(()) => (),
 				Err(()) => return,
 			}
 		}
+	}
+
+	async fn run_with_serialstream(&mut self, mut ep: Box<tokio_serial::SerialStream>) {
+		todo!();
 	}
 }
 
@@ -241,7 +288,7 @@ impl SBXSource {
 		let (sample_zygote, _) = broadcast::channel(384);
 		let (stream_zygote, _) = broadcast::channel(1024);
 		let (guard, stop_ch) = oneshot::channel();
-		SBXSourceWorker::spawn(
+		SBXSourceWorker::spawn_with_snurl(
 			ep,
 			path_prefix,
 			sample_zygote.clone(),
