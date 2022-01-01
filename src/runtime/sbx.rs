@@ -1,16 +1,22 @@
+#[cfg(feature = "serial")]
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
 use log::{debug, info, trace, warn};
 
+#[cfg(feature = "serial")]
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 
-use chrono::{Duration as ChronoDuration, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 
 use enum_map::{enum_map, EnumMap};
 
 use bytes::Buf;
+#[cfg(feature = "serial")]
+use bytes::Bytes;
 
 use crate::metric;
 use crate::sbx;
@@ -37,6 +43,17 @@ struct SBXSourceWorker {
 	rtcifier: sbx::RangeRTC,
 	stream_decoders: EnumMap<sbx::StreamKind, sbx::StreamDecoder<stream::InMemoryBuffer>>,
 	buffer: Vec<Box<sbx::Message>>,
+}
+
+#[cfg(feature = "serial")]
+async fn wait_for_api_frame<S: AsyncRead + Unpin>(src: &mut S) -> io::Result<()> {
+	let mut buf = [0u8; 1];
+	loop {
+		src.read_exact(&mut buf[..]).await?;
+		if buf[0] == 0x7e {
+			return Ok(());
+		}
+	}
 }
 
 impl SBXSourceWorker {
@@ -197,11 +214,14 @@ impl SBXSourceWorker {
 		}
 	}
 
-	fn process_sbx<R: Buf>(&mut self, esp_timestamp: u32, src: &mut R) -> std::io::Result<()> {
+	fn process_sbx<R: Buf>(
+		&mut self,
+		timestamp: Option<DateTime<Utc>>,
+		src: &mut R,
+	) -> std::io::Result<()> {
 		let msg = sbx::Message::read(src)?;
 		if let sbx::Message::Status(ref status) = msg {
-			if esp_timestamp != 0 {
-				let rtc = Utc.timestamp(esp_timestamp as i64, 0);
+			if let Some(rtc) = timestamp {
 				self.rtcifier.align(rtc, status.uptime);
 				if self.rtcifier.ready() {
 					let mapped_rtc = self.rtcifier.map_to_rtc(status.uptime);
@@ -240,7 +260,12 @@ impl SBXSourceWorker {
 				// TODO
 			}
 			sbx::EspMessageType::DataPassthrough => {
-				self.process_sbx(hdr.timestamp, src)?;
+				let timestamp = if hdr.timestamp != 0 {
+					Some(Utc.timestamp(hdr.timestamp as i64, 0))
+				} else {
+					None
+				};
+				self.process_sbx(timestamp, src)?;
 			}
 		}
 		Ok(())
@@ -293,8 +318,103 @@ impl SBXSourceWorker {
 		}
 	}
 
-	async fn run_with_serialstream(&mut self, mut ep: Box<tokio_serial::SerialStream>) {
-		todo!();
+	#[cfg(feature = "serial")]
+	async fn decode_one_from_stream<S: AsyncRead + Unpin>(
+		&mut self,
+		src: &mut S,
+	) -> io::Result<Bytes> {
+		let length = {
+			let mut len_buf = [0u8; 2];
+			src.read_exact(&mut len_buf[..]).await?;
+			let mut len = &len_buf[..];
+			len.get_u16()
+		};
+		if length >= 256 {
+			warn!("oversized frame ({}), assuming desync", length);
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				"oversized frame",
+			));
+		}
+		if length < 13 {
+			warn!("undersized frame ({}), assuming desync", length);
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				"undersized frame",
+			));
+		}
+
+		let mut buf = Vec::new();
+		buf.resize(length as usize + 1, 0u8);
+		src.read_exact(&mut buf[..]).await?;
+
+		let mut checksum = 0u8;
+		for b in buf.iter() {
+			checksum = checksum.wrapping_add(*b);
+		}
+		if checksum != 0xff {
+			warn!("incorrect checksum: 0x{:x} != 0xff", checksum);
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				"checksum mismatch",
+			));
+		}
+
+		let type_ = buf[0];
+		if type_ != 0x10 {
+			warn!("unexpected API frame type ({:?}), dropping", type_);
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				"unsupported API frame type",
+			));
+		}
+
+		// now extract the actual payload; it starts at offset 14
+		let mut buf = Bytes::from(buf);
+		buf.advance(14);
+		// strip off the checksum
+		buf.truncate(buf.len() - 1);
+		debug!("received frame: {:?}", buf);
+		Ok(buf)
+	}
+
+	#[cfg(feature = "serial")]
+	async fn process_one_from_serial(
+		&mut self,
+		src: &mut tokio_serial::SerialStream,
+	) -> Result<(), ()> {
+		match wait_for_api_frame(src).await {
+			Ok(v) => v,
+			Err(e) => {
+				warn!("failed to watch for API frame marker: {}. backing off.", e);
+				tokio::time::sleep(tokio::time::Duration::new(0, 200)).await;
+				return Ok(());
+			}
+		};
+		let mut frame = match self.decode_one_from_stream(src).await {
+			Ok(v) => v,
+			Err(e) => {
+				warn!("failed to receive serial frame: {}. backing off.", e);
+				tokio::time::sleep(tokio::time::Duration::new(0, 200)).await;
+				return Ok(());
+			}
+		};
+		let timestamp = Utc::now();
+		match self.process_sbx(Some(timestamp), &mut frame) {
+			Ok(()) => (),
+			Err(e) => warn!("malformed packet received: {:?}", e),
+		};
+		Ok(())
+	}
+
+	#[cfg(feature = "serial")]
+	async fn run_with_serialstream(&mut self, mut src: Box<tokio_serial::SerialStream>) {
+		loop {
+			match self.process_one_from_serial(&mut src).await {
+				Ok(()) => (),
+				Err(()) => return,
+			}
+		}
 	}
 }
 
@@ -305,6 +425,25 @@ impl SBXSource {
 		let (guard, stop_ch) = oneshot::channel();
 		SBXSourceWorker::spawn_with_snurl(
 			ep,
+			path_prefix,
+			sample_zygote.clone(),
+			stream_zygote.clone(),
+			stop_ch,
+		);
+		Self {
+			sample_zygote,
+			stream_zygote,
+			guard,
+		}
+	}
+
+	#[cfg(feature = "serial")]
+	pub fn with_serial(src: tokio_serial::SerialStream, path_prefix: String) -> Self {
+		let (sample_zygote, _) = broadcast::channel(384);
+		let (stream_zygote, _) = broadcast::channel(1024);
+		let (guard, stop_ch) = oneshot::channel();
+		SBXSourceWorker::spawn_with_serialstream(
+			src,
 			path_prefix,
 			sample_zygote.clone(),
 			stream_zygote.clone(),

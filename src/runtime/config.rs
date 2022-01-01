@@ -245,6 +245,20 @@ pub struct SNURLConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SerialConfig {
+	port: String,
+	baudrate: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum SBXTransportConfig {
+	SNURL(SNURLConfig),
+	#[cfg(feature = "serial")]
+	Serial(SerialConfig),
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct RandomComponent {
 	unit: UnitWrap,
 	min: f64,
@@ -379,7 +393,7 @@ impl From<DetrendMode> for detrend::Mode {
 pub enum Node {
 	SBX {
 		path_prefix: String,
-		transport: SNURLConfig,
+		transport: SBXTransportConfig,
 	},
 	Random {
 		device_type: String,
@@ -456,27 +470,41 @@ impl Node {
 			} => {
 				#[cfg(feature = "sbx")]
 				{
-					let raw_sock = match net::UdpSocket::bind(net::SocketAddr::new(
-						transport.local_address,
-						transport.local_port,
-					)) {
-						Err(e) => return Err(BuildError::Other(Box::new(e))),
-						Ok(s) => s,
-					};
+					let source = match transport {
+						SBXTransportConfig::SNURL(transport) => {
+							let raw_sock = match net::UdpSocket::bind(net::SocketAddr::new(
+								transport.local_address,
+								transport.local_port,
+							)) {
+								Err(e) => return Err(BuildError::Other(Box::new(e))),
+								Ok(s) => s,
+							};
 
-					raw_sock
-						.set_nonblocking(true)
-						.expect("setting the udp socket to be non-blocking");
-					let sock = snurl::Socket::new(
-						tokio::net::UdpSocket::from_std(raw_sock)
-							.expect("conversion to tokio socket"),
-						net::SocketAddr::new(transport.remote_address, transport.remote_port),
-					);
-					let ep = snurl::Endpoint::new(sock);
-					Ok(traits::Node::from_source(SBXSource::new(
-						ep,
-						path_prefix.clone(),
-					)))
+							raw_sock
+								.set_nonblocking(true)
+								.expect("setting the udp socket to be non-blocking");
+							let sock = snurl::Socket::new(
+								tokio::net::UdpSocket::from_std(raw_sock)
+									.expect("conversion to tokio socket"),
+								net::SocketAddr::new(
+									transport.remote_address,
+									transport.remote_port,
+								),
+							);
+							let ep = snurl::Endpoint::new(sock);
+							SBXSource::new(ep, path_prefix.clone())
+						}
+						#[cfg(feature = "serial")]
+						SBXTransportConfig::Serial(transport) => SBXSource::with_serial(
+							tokio_serial::SerialStream::open(&tokio_serial::new(
+								&transport.port,
+								transport.baudrate,
+							))
+							.expect("open serial port"),
+							path_prefix.clone(),
+						),
+					};
+					Ok(traits::Node::from_source(source))
 				}
 				#[cfg(not(feature = "sbx"))]
 				{
