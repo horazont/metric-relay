@@ -228,12 +228,24 @@ impl SBXSourceWorker {
 				if self.rtcifier.ready() {
 					let mapped_rtc = self.rtcifier.map_to_rtc(status.uptime);
 					let divergence = (rtc - mapped_rtc).num_seconds();
+					trace!(
+						"rtc mapping: uptime = {:>5}, remote rtc = {}, mapped rtc = {}, diff = {}",
+						status.uptime,
+						rtc,
+						mapped_rtc,
+						divergence
+					);
 					if divergence.abs() > 90 {
-						warn!("rtcifier is off by {}, resetting", divergence);
+						warn!("rtcifier is off by {}, resetting (uptime = {}, remote rtc = {}, mapped rtc = {}): {:?}", divergence, status.uptime, rtc, mapped_rtc, self.rtcifier);
 						self.rtcifier.reset();
 						self.rtcifier.align(rtc, status.uptime);
 					}
-					trace!("rtc divergence: {}", divergence);
+				} else {
+					trace!(
+						"rtc training: uptime = {:>5}, remote rtc = {}",
+						status.uptime,
+						rtc
+					);
 				}
 			}
 		}
