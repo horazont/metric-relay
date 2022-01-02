@@ -17,6 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let sock = snurl::Socket::new(
 		raw_sock,
 		net::SocketAddr::new("127.0.0.1".parse::<net::IpAddr>().unwrap(), 7201u16),
+		false,
 	);
 	let ep = snurl::Endpoint::new(sock);
 

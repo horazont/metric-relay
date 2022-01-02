@@ -30,6 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			"255.255.255.255".parse::<net::IpAddr>().unwrap(),
 			opt.dst_port,
 		),
+		false,
 	);
 	let mut ep = snurl::Endpoint::new(sock);
 

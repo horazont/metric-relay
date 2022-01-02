@@ -197,6 +197,8 @@ struct Receiver {
 	half_synced: bool,
 	// packets which can be read right away in this order, typically flushed out of the recvqueue on a resync
 	pending: Vec<RecvItem>,
+	// if passive, we do not send sync packets but lock on to any data stream without synchronization
+	passive: bool,
 }
 
 impl fmt::Debug for Receiver {
@@ -210,13 +212,14 @@ impl fmt::Debug for Receiver {
 }
 
 impl Receiver {
-	fn new(state: Arc<SharedState>, max_queue_size: usize) -> Receiver {
+	fn new(state: Arc<SharedState>, max_queue_size: usize, passive: bool) -> Receiver {
 		Receiver {
 			state,
 			buffer: None,
 			q: RecvQueue::new(max_queue_size, 0u16.into()),
 			half_synced: false,
 			pending: Vec::new(),
+			passive,
 		}
 	}
 
@@ -301,6 +304,19 @@ impl Receiver {
 		let local_id = self.state.connection_id();
 		let remote_id = hdr.connection_id;
 		let am_tiebreaker = local_port < remote_port;
+
+		if self.passive {
+			// in passive mode, we take the ID of the remote part and claim sync immediately
+			self.half_synced = false;
+			if local_id != remote_id {
+				self.state.change_connection_id(local_id, remote_id);
+				return HandshakeResult::Resynchronized {
+					lowest_sn: hdr.min_avail_sn,
+				};
+			} else {
+				return HandshakeResult::Synchronized;
+			}
+		}
 
 		if local_id != 0 {
 			// we do have *some* authority over the ID at least
@@ -473,10 +489,14 @@ impl Receiver {
 			// back already
 			match result? {
 				PacketResult::PacketReceived => {
-					self._send_ack(from, addr).await?;
+					if !self.passive {
+						self._send_ack(from, addr).await?;
+					}
 				}
 				PacketResult::EchoRequest => {
-					self._send_echo_response(from, addr).await?;
+					if !self.passive {
+						self._send_echo_response(from, addr).await?;
+					}
 				}
 				PacketResult::Nop => (),
 				other => panic!("not implementd: {:?}", other),
@@ -573,12 +593,12 @@ pub struct Socket {
 /// to avoid loss of data when kernel buffers overflow (just like with normal
 /// UDP sockets).
 impl Socket {
-	pub fn new(conn: UdpSocket, initial_peer_addr: SocketAddr) -> Socket {
+	pub fn new(conn: UdpSocket, initial_peer_addr: SocketAddr, passive: bool) -> Socket {
 		let state = Arc::new(SharedState::new(initial_peer_addr));
 		Socket {
 			state: state.clone(),
 			inner: conn,
-			receiver: Receiver::new(state.clone(), 256),
+			receiver: Receiver::new(state.clone(), 256, passive),
 			transmitter: Transmitter::new(state, 256),
 		}
 	}
@@ -603,7 +623,7 @@ mod tests {
 			"0.0.0.0".parse::<IpAddr>().unwrap(),
 			7201u16,
 		)));
-		let r = Receiver::new(state.clone(), 16);
+		let r = Receiver::new(state.clone(), 16, false);
 		(state, r)
 	}
 

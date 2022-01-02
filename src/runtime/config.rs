@@ -244,6 +244,8 @@ pub struct SNURLConfig {
 	remote_address: net::IpAddr,
 	remote_port: u16,
 	multicast_group: Option<net::IpAddr>,
+	#[serde(default = "bool_false")]
+	passive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -505,6 +507,7 @@ impl Node {
 									transport.remote_address,
 									transport.remote_port,
 								),
+								transport.passive,
 							);
 							let ep = snurl::Endpoint::new(sock);
 							SBXSource::new(ep, path_prefix.clone())
