@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::net;
+use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -242,6 +243,7 @@ pub struct SNURLConfig {
 	#[serde(default = "default_remote_address")]
 	remote_address: net::IpAddr,
 	remote_port: u16,
+	multicast_group: Option<net::IpAddr>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -483,6 +485,19 @@ impl Node {
 							raw_sock
 								.set_nonblocking(true)
 								.expect("setting the udp socket to be non-blocking");
+							if let Some(multicast_group) = transport.multicast_group.as_ref() {
+								match (multicast_group, transport.local_address) {
+									(IpAddr::V4(mc_group), IpAddr::V4(ifaddr)) => {
+										raw_sock
+											.join_multicast_v4(mc_group, &ifaddr)
+											.expect("joining the mulitcast group")
+									},
+									(IpAddr::V6(_), IpAddr::V6(_)) => {
+										panic!("multicast operation not supported on ipv6")
+									},
+									_ => panic!("multicast group address family differs from local address family")
+								}
+							}
 							let sock = snurl::Socket::new(
 								tokio::net::UdpSocket::from_std(raw_sock)
 									.expect("conversion to tokio socket"),
