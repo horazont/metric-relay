@@ -176,12 +176,14 @@ impl SBXSourceWorker {
 						| sbx::StreamKind::CompassZ => 1,
 					};
 					let stream_info = &msg.imu_streams[index];
-					let rtc = self.rtcifier.map_to_rtc(stream_info.timestamp);
-					let seq = stream_info.sequence_number;
-					let ready_pre = dec.ready();
-					dec.align(rtc, seq);
-					if !ready_pre && dec.ready() {
-						info!("decoder for stream {:?} became ready", kind);
+					if stream_info.period != 0 {
+						let rtc = self.rtcifier.map_to_rtc(stream_info.timestamp);
+						let seq = stream_info.sequence_number;
+						let ready_pre = dec.ready();
+						dec.align(rtc, seq);
+						if !ready_pre && dec.ready() {
+							info!("decoder for stream {:?} became ready", kind);
+						}
 					}
 				}
 			}
