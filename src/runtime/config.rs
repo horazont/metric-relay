@@ -873,6 +873,12 @@ pub enum Filter {
 		script: ScriptWrap,
 		new_unit: UnitWrap,
 	},
+	MapInstanceValue {
+		predicate: Option<FilterPredicate>,
+		unit: UnitWrap,
+		component_name: String,
+		mapping: HashMap<SmartString, f64>,
+	},
 }
 
 impl Filter {
@@ -946,6 +952,20 @@ impl Filter {
 				},
 				script: script.0.clone(),
 				new_unit: new_unit.0.clone(),
+			})),
+			Self::MapInstanceValue {
+				predicate,
+				component_name,
+				unit,
+				mapping,
+			} => Ok(Box::new(filter::MapInstanceValue {
+				predicate: match predicate {
+					Some(p) => p.build()?,
+					None => filter::SelectByPath::default(),
+				},
+				unit: unit.0.clone(),
+				component: component_name.into(),
+				mapping: mapping.clone(),
 			})),
 		}
 	}

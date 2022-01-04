@@ -298,6 +298,35 @@ impl Filter for MapInstance {
 	}
 }
 
+pub struct MapInstanceValue {
+	pub predicate: SelectByPath,
+	pub component: SmartString,
+	pub unit: metric::Unit,
+	pub mapping: HashMap<SmartString, f64>,
+}
+
+impl Filter for MapInstanceValue {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
+		if !self.predicate.matches_readout(&input) {
+			return Some(input);
+		}
+		match self.mapping.get(&input.path.instance) {
+			None => return Some(input),
+			Some(new) => {
+				let input_mut = Arc::make_mut(&mut input);
+				input_mut.components.insert(
+					self.component.clone(),
+					metric::Value {
+						magnitude: *new,
+						unit: self.unit.clone(),
+					},
+				);
+				return Some(input);
+			}
+		}
+	}
+}
+
 pub struct MapDeviceType {
 	pub predicate: SelectByPath,
 	pub mapping: HashMap<SmartString, SmartString>,
