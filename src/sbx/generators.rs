@@ -15,8 +15,7 @@ use super::rtcifier;
 
 use chrono::{DateTime, Utc};
 
-static MAIN_COMPONENT: &'static str = "main";
-pub static DS18B20_TEMP_COMPONENT: &'static str = MAIN_COMPONENT;
+pub static DS18B20_TEMP_COMPONENT: &'static str = "temperature";
 pub static NOISE_MIN_COMPONENT: &'static str = "min";
 pub static NOISE_MAX_COMPONENT: &'static str = "max";
 pub static NOISE_RMS_COMPONENT: &'static str = "rms";
