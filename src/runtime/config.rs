@@ -1,7 +1,7 @@
-use smartstring::alias::String as SmartString;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::io;
 use std::net;
 use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(feature = "debug")]
 use std::time;
+
+use smartstring::alias::String as SmartString;
 
 use serde::{de, Deserialize as DeserializeTrait, Deserializer};
 use serde_derive::Deserialize;
@@ -476,41 +478,42 @@ impl Node {
 				{
 					let source = match transport {
 						SBXTransportConfig::SNURL(transport) => {
-							let raw_sock = match net::UdpSocket::bind(net::SocketAddr::new(
-								transport.local_address,
-								transport.local_port,
-							)) {
-								Err(e) => return Err(BuildError::Other(Box::new(e))),
-								Ok(s) => s,
-							};
+							let transport = transport.clone();
+							SBXSource::new(
+								Box::new(move || -> io::Result<snurl::Endpoint> {
+									let raw_sock = net::UdpSocket::bind(net::SocketAddr::new(
+										transport.local_address,
+										transport.local_port,
+									))?;
 
-							raw_sock
-								.set_nonblocking(true)
-								.expect("setting the udp socket to be non-blocking");
-							if let Some(multicast_group) = transport.multicast_group.as_ref() {
-								match (multicast_group, transport.local_address) {
-									(IpAddr::V4(mc_group), IpAddr::V4(ifaddr)) => {
-										raw_sock
-											.join_multicast_v4(mc_group, &ifaddr)
-											.expect("joining the mulitcast group")
-									},
-									(IpAddr::V6(_), IpAddr::V6(_)) => {
-										panic!("multicast operation not supported on ipv6")
-									},
-									_ => panic!("multicast group address family differs from local address family")
-								}
-							}
-							let sock = snurl::Socket::new(
-								tokio::net::UdpSocket::from_std(raw_sock)
-									.expect("conversion to tokio socket"),
-								net::SocketAddr::new(
-									transport.remote_address,
-									transport.remote_port,
-								),
-								transport.passive,
-							);
-							let ep = snurl::Endpoint::new(sock);
-							SBXSource::new(ep, path_prefix.clone())
+									raw_sock.set_nonblocking(true)?;
+									if let Some(multicast_group) =
+										transport.multicast_group.as_ref()
+									{
+										match (multicast_group, transport.local_address) {
+										(IpAddr::V4(mc_group), IpAddr::V4(ifaddr)) => {
+											raw_sock.join_multicast_v4(mc_group, &ifaddr)?
+										},
+										(IpAddr::V6(_), IpAddr::V6(_)) => {
+											panic!("multicast operation not supported on ipv6")
+										},
+										_ => panic!("multicast group address family differs from local address family")
+									}
+									}
+									let sock = snurl::Socket::new(
+										tokio::net::UdpSocket::from_std(raw_sock)
+											.expect("conversion to tokio socket"),
+										net::SocketAddr::new(
+											transport.remote_address,
+											transport.remote_port,
+										),
+										transport.passive,
+									);
+									Ok(snurl::Endpoint::new(sock))
+								}),
+								path_prefix.clone(),
+							)
+							.map_err(|e| BuildError::Other(Box::new(e)))?
 						}
 						#[cfg(feature = "serial")]
 						SBXTransportConfig::Serial(transport) => SBXSource::with_serial(

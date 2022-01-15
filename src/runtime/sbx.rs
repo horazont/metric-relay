@@ -1,4 +1,3 @@
-#[cfg(feature = "serial")]
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,6 +33,8 @@ pub struct SBXSource {
 	guard: oneshot::Sender<()>,
 }
 
+pub type EndpointFactory = Box<dyn Fn() -> io::Result<snurl::Endpoint> + Send + Sync + 'static>;
+
 struct SBXSourceWorker {
 	path_prefix: String,
 	sample_sink: broadcast::Sender<payload::Sample>,
@@ -56,14 +57,21 @@ async fn wait_for_api_frame<S: AsyncRead + Unpin>(src: &mut S) -> io::Result<()>
 	}
 }
 
+enum Error {
+	ConnectionLost,
+	Shutdown,
+}
+
 impl SBXSourceWorker {
 	pub fn spawn_with_snurl(
-		ep: snurl::Endpoint,
+		epf: EndpointFactory,
 		path_prefix: String,
 		sample_sink: broadcast::Sender<payload::Sample>,
 		stream_sink: broadcast::Sender<payload::Stream>,
 		stop_ch: oneshot::Receiver<()>,
-	) {
+	) -> io::Result<()> {
+		let ep = Box::new(epf()?);
+
 		let accel_period = Duration::from_millis(5);
 		let accel_slice = ChronoDuration::seconds(60);
 		let accel_scale = metric::Value {
@@ -94,10 +102,10 @@ impl SBXSourceWorker {
 			},
 			buffer: Vec::new(),
 		};
-		let ep = Box::new(ep);
 		tokio::spawn(async move {
-			worker.run_with_snurl(ep).await;
+			worker.run_with_snurl(ep, epf).await;
 		});
+		Ok(())
 	}
 
 	#[cfg(feature = "serial")]
@@ -285,14 +293,17 @@ impl SBXSourceWorker {
 		Ok(())
 	}
 
-	async fn process_one(&mut self, ep: &mut snurl::Endpoint) -> Result<(), ()> {
+	async fn process_one(&mut self, ep: &mut snurl::Endpoint) -> Result<(), Error> {
 		tokio::select! {
 			received = ep.recv_data() => {
 				match received {
 					// the socket was closed somehow? not sure how that could happen, but we need to shutdown then
+					// well as it turns out it can happen when the network goes down, who would've thought.
+					// which can happen when the router reboots because wifi.
+					// which means we need to be smarter here than that.'
 					None => {
 						warn!("SBX SNURL endpoint closed unexpectedly");
-						Err(())
+						Err(Error::ConnectionLost)
 					},
 					Some(snurl::RecvItem::ResyncMarker) => {
 						info!("resynchronized to SNURL sender, resetting all state");
@@ -318,16 +329,25 @@ impl SBXSourceWorker {
 			_ = &mut self.stop_ch => {
 				// SBXSource dropped, shut down
 				// this will cascade down to our recipients then :)
-				Err(())
+				Err(Error::Shutdown)
 			},
 		}
 	}
 
-	async fn run_with_snurl(&mut self, mut ep: Box<snurl::Endpoint>) {
+	async fn run_with_snurl(&mut self, mut ep: Box<snurl::Endpoint>, epf: EndpointFactory) {
+		let epf = super::retry::Retry::new(epf, tokio::time::Duration::new(1, 0));
 		loop {
 			match self.process_one(&mut ep).await {
 				Ok(()) => (),
-				Err(()) => return,
+				Err(Error::ConnectionLost) => {
+					ep = Box::new(
+						epf.obtain(|e| {
+							warn!("failed to re-establish SNURL endpoint: {}", e);
+						})
+						.await,
+					);
+				}
+				Err(Error::Shutdown) => return,
 			}
 		}
 	}
@@ -433,22 +453,22 @@ impl SBXSourceWorker {
 }
 
 impl SBXSource {
-	pub fn new(ep: snurl::Endpoint, path_prefix: String) -> Self {
+	pub fn new(epf: EndpointFactory, path_prefix: String) -> io::Result<Self> {
 		let (sample_zygote, _) = broadcast::channel(384);
 		let (stream_zygote, _) = broadcast::channel(1024);
 		let (guard, stop_ch) = oneshot::channel();
 		SBXSourceWorker::spawn_with_snurl(
-			ep,
+			epf,
 			path_prefix,
 			sample_zygote.clone(),
 			stream_zygote.clone(),
 			stop_ch,
-		);
-		Self {
+		)?;
+		Ok(Self {
 			sample_zygote,
 			stream_zygote,
 			guard,
-		}
+		})
 	}
 
 	#[cfg(feature = "serial")]
