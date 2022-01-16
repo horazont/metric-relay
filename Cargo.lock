@@ -618,6 +618,7 @@ dependencies = [
  "getrandom",
  "glob",
  "i2c-linux",
+ "lazy_static",
  "libc",
  "log",
  "microtemplate",
