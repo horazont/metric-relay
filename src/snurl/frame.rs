@@ -184,6 +184,7 @@ impl DataFrame {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AppRequest {
 	request_id: RequestId,
 	request_type: u8,
@@ -191,6 +192,7 @@ pub struct AppRequest {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AppResponse {
 	request_id: RequestId,
 	payload: Bytes,

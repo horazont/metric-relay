@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+#[cfg(feature = "sbx")]
 use std::io;
 use std::net;
+#[cfg(feature = "sbx")]
 use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
@@ -237,6 +239,7 @@ impl<'de> DeserializeTrait<'de> for UnitWrap {
 	}
 }
 
+#[cfg_attr(not(feature = "sbx"), allow(dead_code))]
 #[derive(Debug, Clone, Deserialize)]
 pub struct SNURLConfig {
 	#[serde(default = "default_local_address")]
@@ -250,6 +253,7 @@ pub struct SNURLConfig {
 	passive: bool,
 }
 
+#[cfg(feature = "serial")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct SerialConfig {
 	port: String,
@@ -266,8 +270,11 @@ pub enum SBXTransportConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RandomComponent {
+	#[cfg_attr(not(feature = "debug"), allow(dead_code))]
 	unit: UnitWrap,
+	#[cfg_attr(not(feature = "debug"), allow(dead_code))]
 	min: f64,
+	#[cfg_attr(not(feature = "debug"), allow(dead_code))]
 	max: f64,
 }
 

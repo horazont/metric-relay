@@ -578,7 +578,6 @@ impl Transmitter {
 
 #[derive(Debug)]
 pub struct Socket {
-	state: Arc<SharedState>,
 	inner: UdpSocket,
 	receiver: Receiver,
 	transmitter: Transmitter,
@@ -596,7 +595,6 @@ impl Socket {
 	pub fn new(conn: UdpSocket, initial_peer_addr: SocketAddr, passive: bool) -> Socket {
 		let state = Arc::new(SharedState::new(initial_peer_addr));
 		Socket {
-			state: state.clone(),
 			inner: conn,
 			receiver: Receiver::new(state.clone(), 256, passive),
 			transmitter: Transmitter::new(state, 256),

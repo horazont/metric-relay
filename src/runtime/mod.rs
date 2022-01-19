@@ -16,6 +16,7 @@ mod payload;
 mod pubsub;
 #[cfg(feature = "relay")]
 mod relay;
+#[cfg(feature = "sbx")]
 mod retry;
 mod router;
 #[cfg(feature = "sbx")]

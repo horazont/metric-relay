@@ -154,6 +154,7 @@ impl RecvSessionState {
 #[derive(Debug)]
 struct RecvSession {
 	state: Arc<RecvSessionState>,
+	#[allow(dead_code)]
 	guard: oneshot::Sender<()>,
 }
 
