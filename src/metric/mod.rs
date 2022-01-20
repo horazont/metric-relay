@@ -86,7 +86,7 @@ impl fmt::Display for Unit {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct DevicePath {
 	/// Type of device which was read

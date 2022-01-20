@@ -25,6 +25,7 @@ mod sbx;
 mod smbus;
 #[cfg(feature = "stream-filearchive")]
 mod stream;
+mod streamify;
 #[cfg(feature = "summary")]
 mod summary;
 mod traits;

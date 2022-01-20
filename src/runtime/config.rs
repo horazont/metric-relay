@@ -39,6 +39,7 @@ use super::sbx::SBXSource;
 use super::smbus;
 #[cfg(feature = "stream-filearchive")]
 use super::stream as runtime_stream;
+use super::streamify;
 #[cfg(feature = "summary")]
 use super::summary;
 use super::traits;
@@ -402,6 +403,15 @@ impl From<DetrendMode> for detrend::Mode {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct StreamifyDescription {
+	device_type: String,
+	instance: String,
+	component: String,
+	period_ms: u64,
+	slice_ms: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "class")]
 pub enum Node {
 	SBX {
@@ -471,6 +481,9 @@ pub enum Node {
 	},
 	Detrend {
 		mode: DetrendMode,
+	},
+	Streamify {
+		stream: Vec<StreamifyDescription>,
 	},
 }
 
@@ -823,6 +836,24 @@ impl Node {
 						feature_name: "detrend",
 					})
 				}
+			}
+			Self::Streamify { stream: streams } => {
+				let mut descriptors = HashMap::new();
+				for stream in streams.iter() {
+					let descriptor = streamify::Descriptor::new(
+						stream.component.clone().into(),
+						std::time::Duration::from_millis(stream.period_ms),
+						chrono::Duration::milliseconds(stream.slice_ms),
+					);
+					descriptors.insert(
+						metric::DevicePath {
+							device_type: stream.device_type.clone().into(),
+							instance: stream.instance.clone().into(),
+						},
+						descriptor,
+					);
+				}
+				Ok(traits::Node::from(streamify::Streamify::new(descriptors)))
 			}
 		}
 	}
