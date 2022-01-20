@@ -67,6 +67,15 @@ impl FftWorker {
 					})
 					.collect(),
 			),
+			// TODO: preserve f64 precision?
+			metric::RawData::F64(ref v) => v.with_data(
+				v.iter()
+					.map(|x| Complex {
+						re: *x as f32,
+						im: 0.0,
+					})
+					.collect(),
+			),
 		};
 		let mut offset = 0usize;
 

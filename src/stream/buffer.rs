@@ -78,14 +78,112 @@ pub trait StreamBuffer {
 }
 
 #[derive(Debug, Clone)]
+enum Writer {
+	I16(MaskedArrayWriter<i16>),
+	F64(MaskedArrayWriter<f64>),
+}
+
+impl Writer {
+	fn into_inner(self) -> metric::RawData {
+		match self {
+			Self::I16(data) => metric::RawData::I16(data.into_inner()),
+			Self::F64(data) => metric::RawData::F64(data.into_inner()),
+		}
+	}
+
+	fn from_subblock(other: &metric::RawData, start_at: usize, block_size: usize) -> Self {
+		match other {
+			metric::RawData::I16(data) => {
+				let mut buf: MaskedArrayWriter<_> =
+					MaskedArray::masked_with_value(block_size, 0).into();
+				buf.copy_from_slice(&data[start_at..]);
+				Self::I16(buf)
+			}
+			metric::RawData::F64(data) => {
+				let mut buf: MaskedArrayWriter<_> =
+					MaskedArray::masked_with_value(block_size, 0.).into();
+				buf.copy_from_slice(&data[start_at..]);
+				Self::F64(buf)
+			}
+		}
+	}
+
+	fn empty_with_type(block_size: usize, typeref: &metric::RawData) -> Self {
+		match typeref {
+			metric::RawData::I16(_) => {
+				let buf: MaskedArrayWriter<_> =
+					MaskedArray::masked_with_value(block_size, 0).into();
+				Self::I16(buf)
+			}
+			metric::RawData::F64(_) => {
+				let buf: MaskedArrayWriter<_> =
+					MaskedArray::masked_with_value(block_size, 0.).into();
+				Self::F64(buf)
+			}
+		}
+	}
+
+	fn capacity(&self) -> usize {
+		match self {
+			Self::I16(data) => data.capacity(),
+			Self::F64(data) => data.capacity(),
+		}
+	}
+
+	fn cursor(&self) -> usize {
+		match self {
+			Self::I16(data) => data.cursor(),
+			Self::F64(data) => data.cursor(),
+		}
+	}
+
+	fn setpos(&mut self, at: usize) {
+		match self {
+			Self::I16(data) => data.setpos(at),
+			Self::F64(data) => data.setpos(at),
+		}
+	}
+
+	fn copy_from_block(&mut self, block: &metric::RawData, up_to: usize) -> usize {
+		match self {
+			Self::I16(data) => match block {
+				metric::RawData::I16(ref v) => {
+					data.copy_from_slice(&v[..up_to]);
+					v.len().saturating_sub(up_to)
+				}
+				_ => panic!("mismatching data types"),
+			},
+			Self::F64(data) => match block {
+				metric::RawData::F64(ref v) => {
+					data.copy_from_slice(&v[..up_to]);
+					v.len().saturating_sub(up_to)
+				}
+				_ => panic!("mismatching data types"),
+			},
+		}
+	}
+}
+
+impl From<MaskedArray<i16>> for Writer {
+	fn from(other: MaskedArray<i16>) -> Self {
+		Self::I16(other.into())
+	}
+}
+
+impl From<MaskedArray<f64>> for Writer {
+	fn from(other: MaskedArray<f64>) -> Self {
+		Self::F64(other.into())
+	}
+}
+
+#[derive(Debug, Clone)]
 struct BufferedBlock {
 	t0: DateTime<Utc>,
 	seq0: SerialNumber,
 	path: metric::DevicePath,
 	period: Duration,
 	scale: metric::Value,
-	// TODO: generalize on the data type; could be done by extending and using RawData accordingly
-	data: MaskedArrayWriter<i16>,
+	data: Writer,
 }
 
 impl From<BufferedBlock> for metric::StreamBlock {
@@ -96,7 +194,7 @@ impl From<BufferedBlock> for metric::StreamBlock {
 			path: other.path,
 			period: other.period.to_std().unwrap(),
 			scale: other.scale,
-			data: Arc::new(metric::RawData::I16(other.data.into_inner())),
+			data: Arc::new(other.data.into_inner()),
 		}
 	}
 }
@@ -227,7 +325,7 @@ impl StreamBuffer for InMemoryBuffer {
 					seq0: out_block_seq0,
 					path: block.path.clone(),
 					scale: block.scale.clone(),
-					data: MaskedArray::masked_with_value(samples_per_block, 0).into(),
+					data: Writer::empty_with_type(samples_per_block, &*block.data),
 				});
 				self.update_reference();
 				self.next_block.as_mut().unwrap()
@@ -257,7 +355,7 @@ impl StreamBuffer for InMemoryBuffer {
 						seq0: out_block_seq0,
 						path: block.path.clone(),
 						scale: block.scale.clone(),
-						data: MaskedArray::masked_with_value(samples_per_block, 0).into(),
+						data: Writer::empty_with_type(samples_per_block, &*block.data),
 					});
 					self.update_reference();
 					self.next_block.as_mut().unwrap()
@@ -285,17 +383,7 @@ impl StreamBuffer for InMemoryBuffer {
 			max_take < block.data.len()
 		);
 
-		let mut overhang: Vec<i16> = Vec::new();
-
-		match *block.data {
-			metric::RawData::I16(ref v) => {
-				next_block.data.copy_from_slice(&v[..max_take]);
-				if max_take < v.len() {
-					overhang.reserve(samples_per_block);
-					overhang.extend(&v[max_take..]);
-				}
-			}
-		}
+		let remaining = next_block.data.copy_from_block(&*block.data, max_take);
 
 		if next_block.data.cursor() == next_block.data.capacity() {
 			// emit the block
@@ -307,7 +395,7 @@ impl StreamBuffer for InMemoryBuffer {
 		}
 
 		// now we only need to handle the overhang
-		if overhang.len() > 0 {
+		if remaining > 0 {
 			let new_t0 = out_block_t0 + self.slice;
 			trace!("starting new block at t0 = {}  [overhang]", new_t0);
 			self.next_block = Some(BufferedBlock {
@@ -319,12 +407,7 @@ impl StreamBuffer for InMemoryBuffer {
 				seq0: out_block_seq0 + (samples_per_block as u16),
 				path: block.path.clone(),
 				scale: block.scale.clone(),
-				data: {
-					let mut data: MaskedArrayWriter<_> =
-						MaskedArray::masked_with_value(samples_per_block, 0).into();
-					data.copy_from_slice(&overhang[..]);
-					data
-				},
+				data: Writer::from_subblock(&*block.data, max_take, samples_per_block),
 			});
 			self.update_reference();
 		}

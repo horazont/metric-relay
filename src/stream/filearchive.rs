@@ -66,6 +66,11 @@ impl ArchiveWrite for SimpleFileArchive {
 					f.write_i16::<LittleEndian>(*v)?;
 				}
 			}
+			metric::RawData::F64(ref vs) => {
+				for v in vs.iter() {
+					f.write_f64::<LittleEndian>(*v)?;
+				}
+			}
 		};
 		f.sync_all()?;
 		Ok(())

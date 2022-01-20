@@ -84,6 +84,10 @@ impl DetrendWorker {
 				.iter_unmasked_enumerated()
 				.map(|(i, v)| (i as f32, *v as f32))
 				.collect(),
+			metric::RawData::F64(ref vs) => vs
+				.iter_unmasked_enumerated()
+				.map(|(i, v)| (i as f32, *v as f32))
+				.collect(),
 		};
 		match mode {
 			Mode::Constant => debias(&mut coords[..]),
@@ -102,6 +106,13 @@ impl DetrendWorker {
 						*dest = y.min(i16::MAX as f32).max(i16::MIN as f32) as i16
 					}
 					metric::RawData::I16(vs)
+				}
+				metric::RawData::F64(ref vs) => {
+					let mut vs = vs.clone();
+					for (dest, (_, y)) in vs.iter_unmasked_mut(..).zip(coords.iter()) {
+						*dest = *y as f64
+					}
+					metric::RawData::F64(vs)
 				}
 			}),
 		});

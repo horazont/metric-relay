@@ -30,18 +30,22 @@ impl SummaryWorker {
 		tokio::spawn(async move { worker.run().await });
 	}
 
-	fn process_chunk(
+	fn process_chunk<X: Copy>(
 		t: DateTime<Utc>,
 		path: &metric::DevicePath,
-		chunk: &[i16],
+		chunk: &[&X],
 		scale: &metric::Value,
-	) -> payload::Readout {
+		clip: f64,
+	) -> payload::Readout
+	where
+		f64: From<X>,
+	{
 		let mut sum = 0.0f64;
 		let mut min = 1.0f64 / 0.0;
 		let mut max = -1.0f64 / 0.0;
 		let mut sq_sum = 0.0f64;
 		for v in chunk {
-			let vf = (*v as f64) / (i16::MAX as f64) * scale.magnitude;
+			let vf = (<f64 as From<X>>::from(**v)) / clip * scale.magnitude;
 			sum += vf;
 			sq_sum += vf * vf;
 			min = min.min(vf);
@@ -105,7 +109,7 @@ impl SummaryWorker {
 		match *block.data {
 			metric::RawData::I16(ref vec) => {
 				readouts.reserve((vec.len() + size - 1) / size);
-				let mut buffer = Vec::with_capacity(size);
+				let mut buffer: Vec<&i16> = Vec::with_capacity(size);
 				for (i, chunk) in vec.unmasked_chunks(size).enumerate() {
 					let t = block.t0 + (period * (i * size) as i32);
 					buffer.extend(chunk);
@@ -115,6 +119,24 @@ impl SummaryWorker {
 							&block.path,
 							&buffer[..],
 							&block.scale,
+							i16::MAX as f64,
+						));
+					}
+				}
+			}
+			metric::RawData::F64(ref vec) => {
+				readouts.reserve((vec.len() + size - 1) / size);
+				let mut buffer: Vec<&f64> = Vec::with_capacity(size);
+				for (i, chunk) in vec.unmasked_chunks(size).enumerate() {
+					let t = block.t0 + (period * (i * size) as i32);
+					buffer.extend(chunk);
+					if buffer.len() > 0 {
+						readouts.push(Self::process_chunk(
+							t,
+							&block.path,
+							&buffer[..],
+							&block.scale,
+							1.0,
 						));
 					}
 				}

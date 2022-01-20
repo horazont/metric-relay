@@ -140,8 +140,8 @@ pub enum StreamFormat {
 	U32,
 	I64,
 	U64,
-	F32,
-	F64, */
+	F32, */
+	F64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,14 +155,15 @@ pub enum RawData {
 	U32(MaskedArray<u32>),
 	I64(MaskedArray<i64>),
 	U64(MaskedArray<u64>),
-	F32(MaskedArray<f32>),
-	F64(MaskedArray<f64>), */
+	F32(MaskedArray<f32>), */
+	F64(MaskedArray<f64>),
 }
 
 impl RawData {
 	pub fn len(&self) -> usize {
 		match self {
 			Self::I16(v) => v.len(),
+			Self::F64(v) => v.len(),
 		}
 	}
 }
