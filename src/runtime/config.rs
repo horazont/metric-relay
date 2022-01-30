@@ -26,6 +26,7 @@ use super::detrend;
 #[cfg(feature = "fft")]
 use super::fft;
 use super::filter;
+use super::hwmon;
 #[cfg(feature = "influxdb")]
 use super::influxdb;
 #[cfg(feature = "pubsub")]
@@ -412,6 +413,15 @@ pub struct StreamifyDescription {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct HwmonSensor {
+	name: String,
+	sensor: u32,
+	#[serde(rename = "type")]
+	type_: hwmon::Type,
+	component: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "class")]
 pub enum Node {
 	SBX {
@@ -484,6 +494,12 @@ pub enum Node {
 	},
 	Streamify {
 		stream: Vec<StreamifyDescription>,
+	},
+	Hwmon {
+		device_type: String,
+		instance: String,
+		interval: u32,
+		sensors: Vec<HwmonSensor>,
 	},
 }
 
@@ -854,6 +870,35 @@ impl Node {
 					);
 				}
 				Ok(traits::Node::from(streamify::Streamify::new(descriptors)))
+			}
+			Self::Hwmon {
+				interval,
+				device_type,
+				instance,
+				sensors: sensor_defs,
+			} => {
+				let mut sensors = Vec::new();
+				for def in sensor_defs.iter() {
+					match hwmon::Sensor::new(
+						&def.name,
+						def.sensor,
+						def.type_,
+						def.component.clone().into(),
+					) {
+						Ok(v) => sensors.push(v),
+						Err(e) => return Err(BuildError::Other(Box::new(e))),
+					}
+				}
+				Ok(traits::Node::from_source(hwmon::Hwmon::new(
+					hwmon::Scrape::new(
+						std::time::Duration::from_millis(*interval as u64),
+						metric::DevicePath {
+							device_type: device_type.clone().into(),
+							instance: instance.clone().into(),
+						},
+						sensors,
+					),
+				)))
 			}
 		}
 	}

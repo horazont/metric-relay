@@ -9,6 +9,7 @@ mod detrend;
 #[cfg(feature = "fft")]
 mod fft;
 mod filter;
+mod hwmon;
 #[cfg(feature = "influxdb")]
 mod influxdb;
 mod payload;
