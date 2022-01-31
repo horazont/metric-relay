@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 mod adapter;
 mod config;
+#[cfg(feature = "csv")]
+mod csvinject;
 #[cfg(feature = "debug")]
 mod debug;
 #[cfg(feature = "detrend")]

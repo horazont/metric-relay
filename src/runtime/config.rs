@@ -19,6 +19,8 @@ use serde_derive::Deserialize;
 
 use glob;
 
+#[cfg(feature = "csv")]
+use super::csvinject;
 #[cfg(feature = "debug")]
 use super::debug;
 #[cfg(feature = "detrend")]
@@ -422,6 +424,14 @@ pub struct HwmonSensor {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(not(feature = "csv"), allow(dead_code))]
+pub struct CsvComponentMapping {
+	column: String,
+	component: String,
+	unit: UnitWrap,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "class")]
 pub enum Node {
 	SBX {
@@ -500,6 +510,16 @@ pub enum Node {
 		instance: String,
 		interval: u32,
 		sensors: Vec<HwmonSensor>,
+	},
+	FromCsv {
+		filename: String,
+		device_type_column: String,
+		instance_column: String,
+		timestamp_column: String,
+		components: Vec<CsvComponentMapping>,
+		batch_size: usize,
+		start_time: chrono::DateTime<chrono::Utc>,
+		end_time: chrono::DateTime<chrono::Utc>,
 	},
 }
 
@@ -899,6 +919,64 @@ impl Node {
 						sensors,
 					),
 				)))
+			}
+			Self::FromCsv {
+				filename,
+				device_type_column,
+				instance_column,
+				timestamp_column,
+				components,
+				start_time,
+				end_time,
+				batch_size,
+			} => {
+				#[cfg(feature = "csv")]
+				{
+					let file = match std::fs::File::open(filename) {
+						Ok(v) => v,
+						Err(e) => return Err(BuildError::Other(Box::new(e))),
+					};
+					let mut component_mapping = Vec::with_capacity(components.len());
+					for decl in components.iter() {
+						component_mapping.push((
+							decl.column.as_str(),
+							decl.component.clone().into(),
+							decl.unit.0.clone(),
+						));
+					}
+					let node = match csvinject::Injector::new(
+						Box::new(file),
+						device_type_column,
+						instance_column,
+						timestamp_column,
+						component_mapping,
+						*start_time,
+						*end_time,
+						chrono::Duration::seconds(0),
+						*batch_size,
+					) {
+						Ok(v) => v,
+						Err(e) => return Err(BuildError::Other(Box::new(e))),
+					};
+					Ok(traits::Node::from_source(node))
+				}
+				#[cfg(not(feature = "csv"))]
+				{
+					let _ = (
+						filename,
+						device_type_column,
+						instance_column,
+						timestamp_column,
+						components,
+						start_time,
+						end_time,
+						batch_size,
+					);
+					Err(BuildError::FeatureNotAvailable {
+						which: "FromCsv node".into(),
+						feature_name: "csv",
+					})
+				}
 			}
 		}
 	}
