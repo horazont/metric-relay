@@ -158,6 +158,7 @@ impl Injector {
 		end_time: chrono::DateTime<chrono::Utc>,
 		offset: chrono::Duration,
 		batch_size: usize,
+		sleep: Duration,
 	) -> io::Result<Injector> {
 		let mut reader = csv::ReaderBuilder::default()
 			.has_headers(true)
@@ -179,7 +180,7 @@ impl Injector {
 			offset,
 			components,
 			batch: batch_size,
-			sleep: Duration::from_millis(10),
+			sleep,
 		};
 		let (zygote, _) = broadcast::channel(8);
 		let sink = zygote.clone();

@@ -520,6 +520,7 @@ pub enum Node {
 		batch_size: usize,
 		start_time: chrono::DateTime<chrono::Utc>,
 		end_time: chrono::DateTime<chrono::Utc>,
+		sleep_ms: u32,
 	},
 }
 
@@ -929,6 +930,7 @@ impl Node {
 				start_time,
 				end_time,
 				batch_size,
+				sleep_ms,
 			} => {
 				#[cfg(feature = "csv")]
 				{
@@ -954,6 +956,7 @@ impl Node {
 						*end_time,
 						chrono::Duration::seconds(0),
 						*batch_size,
+						std::time::Duration::from_millis(*sleep_ms as u64),
 					) {
 						Ok(v) => v,
 						Err(e) => return Err(BuildError::Other(Box::new(e))),
@@ -971,6 +974,7 @@ impl Node {
 						start_time,
 						end_time,
 						batch_size,
+						sleep_ms,
 					);
 					Err(BuildError::FeatureNotAvailable {
 						which: "FromCsv node".into(),
