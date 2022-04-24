@@ -16,7 +16,6 @@ use super::traits;
 
 struct RelaySourceWorker {
 	sample_sink: broadcast::Sender<payload::Sample>,
-	#[allow(dead_code)]
 	stream_sink: broadcast::Sender<payload::Stream>,
 	stop_ch: oneshot::Receiver<()>,
 	socket: relay::RecvSocket,
@@ -34,8 +33,10 @@ impl RelaySourceWorker {
 						// we use the stop_ch as a guard.
 						let _ = self.sample_sink.send(r.into());
 					},
-					Ok(relay::DataFrame::Stream) => {
-						unreachable!();
+					Ok(relay::DataFrame::Stream(b)) => {
+						// we cannot use the result as indicator because the parent struct only holds on to senders, not to receivers.
+						// we use the stop_ch as a guard.
+						let _ = self.stream_sink.send(b.into());
 					},
 					Err(_) => {
 						// socket went down, close.
@@ -107,7 +108,9 @@ impl RelaySinkWorker {
 					None => return,
 				},
 				v = self.stream_source.recv() => match v {
-					Some(_) => unreachable!(),
+					Some(block) => {
+						self.sock.send(relay::DataFrame::Stream(block.into())).await
+					},
 					None => return,
 				},
 			}

@@ -22,6 +22,9 @@ use crate::metric;
 #[derive(Debug, Clone)]
 pub struct ReadoutWrap(Vec<Arc<metric::Readout>>);
 
+#[derive(Debug, Clone)]
+pub struct StreamBlockWrap(Arc<metric::StreamBlock>);
+
 struct ReadoutsVisitor();
 
 impl<'de> Visitor<'de> for ReadoutsVisitor {
@@ -82,10 +85,50 @@ impl From<Vec<Arc<metric::Readout>>> for ReadoutWrap {
 	}
 }
 
+impl<'de> serde::Deserialize<'de> for StreamBlockWrap {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		Ok(Self(Arc::new(metric::StreamBlock::deserialize(
+			deserializer,
+		)?)))
+	}
+}
+
+impl serde::Serialize for StreamBlockWrap {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		self.0.serialize(serializer)
+	}
+}
+
+impl Deref for StreamBlockWrap {
+	type Target = Arc<metric::StreamBlock>;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl From<StreamBlockWrap> for Arc<metric::StreamBlock> {
+	fn from(other: StreamBlockWrap) -> Self {
+		other.0
+	}
+}
+
+impl From<Arc<metric::StreamBlock>> for StreamBlockWrap {
+	fn from(other: Arc<metric::StreamBlock>) -> Self {
+		Self(other)
+	}
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum DataFrame {
 	Readout(ReadoutWrap),
-	Stream,
+	Stream(StreamBlockWrap),
 }
 
 pub type ClientId = u128;
