@@ -1,5 +1,7 @@
 #[cfg(any(feature = "smbus", feature = "sbx"))]
 pub mod bme280;
+#[cfg(any(feature = "smbus", feature = "sbx"))]
+pub mod bme68x;
 #[cfg(feature = "influxdb")]
 pub mod influxdb;
 pub mod meteo;
