@@ -37,6 +37,7 @@ pub type EndpointFactory = Box<dyn Fn() -> io::Result<snurl::Endpoint> + Send + 
 
 struct SBXSourceWorker {
 	path_prefix: String,
+	rewrite_bme68x: bool,
 	sample_sink: broadcast::Sender<payload::Sample>,
 	#[allow(dead_code)]
 	stream_sink: broadcast::Sender<payload::Stream>,
@@ -66,6 +67,7 @@ impl SBXSourceWorker {
 	pub fn spawn_with_snurl(
 		epf: EndpointFactory,
 		path_prefix: String,
+		rewrite_bme68x: bool,
 		sample_sink: broadcast::Sender<payload::Sample>,
 		stream_sink: broadcast::Sender<payload::Stream>,
 		stop_ch: oneshot::Receiver<()>,
@@ -88,6 +90,7 @@ impl SBXSourceWorker {
 
 		let mut worker = Self {
 			path_prefix,
+			rewrite_bme68x,
 			sample_sink,
 			stream_sink,
 			stop_ch,
@@ -112,6 +115,7 @@ impl SBXSourceWorker {
 	pub fn spawn_with_serialstream(
 		src: tokio_serial::SerialStream,
 		path_prefix: String,
+		rewrite_bme68x: bool,
 		sample_sink: broadcast::Sender<payload::Sample>,
 		stream_sink: broadcast::Sender<payload::Stream>,
 		stop_ch: oneshot::Receiver<()>,
@@ -132,6 +136,7 @@ impl SBXSourceWorker {
 
 		let mut worker = Self {
 			path_prefix,
+			rewrite_bme68x,
 			sample_sink,
 			stream_sink,
 			stop_ch,
@@ -154,10 +159,16 @@ impl SBXSourceWorker {
 
 	fn process_ready(&mut self, msg: sbx::Message) {
 		let prefix = &self.path_prefix;
+		let rewrite_bme68x = self.rewrite_bme68x;
 		let readouts = msg
 			.readouts(&mut self.rtcifier)
 			.map(|mut x| {
 				x.path.instance.insert_str(0, prefix);
+				if (x.path.device_type == "bme688" || x.path.device_type == "bme680")
+					&& rewrite_bme68x
+				{
+					x.path.device_type = "bme280".into();
+				}
 				Arc::new(x)
 			})
 			.collect();
@@ -453,13 +464,18 @@ impl SBXSourceWorker {
 }
 
 impl SBXSource {
-	pub fn new(epf: EndpointFactory, path_prefix: String) -> io::Result<Self> {
+	pub fn new(
+		epf: EndpointFactory,
+		path_prefix: String,
+		rewrite_bme68x: bool,
+	) -> io::Result<Self> {
 		let (sample_zygote, _) = broadcast::channel(384);
 		let (stream_zygote, _) = broadcast::channel(1024);
 		let (guard, stop_ch) = oneshot::channel();
 		SBXSourceWorker::spawn_with_snurl(
 			epf,
 			path_prefix,
+			rewrite_bme68x,
 			sample_zygote.clone(),
 			stream_zygote.clone(),
 			stop_ch,
@@ -472,13 +488,18 @@ impl SBXSource {
 	}
 
 	#[cfg(feature = "serial")]
-	pub fn with_serial(src: tokio_serial::SerialStream, path_prefix: String) -> Self {
+	pub fn with_serial(
+		src: tokio_serial::SerialStream,
+		path_prefix: String,
+		rewrite_bme68x: bool,
+	) -> Self {
 		let (sample_zygote, _) = broadcast::channel(384);
 		let (stream_zygote, _) = broadcast::channel(1024);
 		let (guard, stop_ch) = oneshot::channel();
 		SBXSourceWorker::spawn_with_serialstream(
 			src,
 			path_prefix,
+			rewrite_bme68x,
 			sample_zygote.clone(),
 			stream_zygote.clone(),
 			stop_ch,

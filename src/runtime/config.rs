@@ -436,6 +436,8 @@ pub struct CsvComponentMapping {
 pub enum Node {
 	SBX {
 		path_prefix: String,
+		#[serde(default = "bool_false")]
+		rewrite_bme68x: bool,
 		transport: SBXTransportConfig,
 	},
 	Random {
@@ -529,6 +531,7 @@ impl Node {
 		match self {
 			Self::SBX {
 				path_prefix,
+				rewrite_bme68x,
 				transport,
 			} => {
 				#[cfg(feature = "sbx")]
@@ -569,6 +572,7 @@ impl Node {
 									Ok(snurl::Endpoint::new(sock))
 								}),
 								path_prefix.clone(),
+								*rewrite_bme68x,
 							)
 							.map_err(|e| BuildError::Other(Box::new(e)))?
 						}
@@ -580,13 +584,14 @@ impl Node {
 							))
 							.expect("open serial port"),
 							path_prefix.clone(),
+							*rewrite_bme68x,
 						),
 					};
 					Ok(traits::Node::from_source(source))
 				}
 				#[cfg(not(feature = "sbx"))]
 				{
-					let _ = (path_prefix, transport);
+					let _ = (path_prefix, rewrite_bme68x, transport);
 					Err(BuildError::FeatureNotAvailable {
 						which: "SBXSource node".into(),
 						feature_name: "sbx",
