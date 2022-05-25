@@ -8,8 +8,9 @@ mod rtcifier;
 mod stream;
 
 pub use frame::{
-	EspMessageHeader, EspMessageType, EspStatus, SbxBME280Message, SbxDS18B20Message,
-	SbxLightMessage, SbxMessageType, SbxNoiseMessage, SbxStatusMessage, SbxStreamMessage,
+	EspMessageHeader, EspMessageType, EspStatus, SbxBME280Message, SbxBME688Message,
+	SbxDS18B20Message, SbxLightMessage, SbxMessageType, SbxNoiseMessage, SbxStatusMessage,
+	SbxStreamMessage,
 };
 
 pub use generators::ReadoutIterable;
@@ -24,6 +25,7 @@ pub enum ReadoutMessage {
 	DS18B20(SbxDS18B20Message),
 	Light(SbxLightMessage),
 	BME280(SbxBME280Message),
+	BME688(SbxBME688Message),
 	Noise(SbxNoiseMessage),
 }
 
@@ -45,6 +47,12 @@ impl From<SbxBME280Message> for ReadoutMessage {
 	}
 }
 
+impl From<SbxBME688Message> for ReadoutMessage {
+	fn from(other: SbxBME688Message) -> Self {
+		Self::BME688(other)
+	}
+}
+
 impl From<SbxNoiseMessage> for ReadoutMessage {
 	fn from(other: SbxNoiseMessage) -> Self {
 		Self::Noise(other)
@@ -58,6 +66,7 @@ impl<'x, T: rtcifier::RTCifier + 'static> generators::ReadoutIterable<'x, T> for
 		match self {
 			Self::DS18B20(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
 			Self::BME280(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
+			Self::BME688(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
 			Self::Noise(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
 			Self::Light(msg) => Self::GenIter::wrap(msg.readouts(rtcifier)),
 		}
@@ -119,6 +128,7 @@ impl Message {
 			SensorDS18B20 => Ok(SbxDS18B20Message::read(r)?.into()),
 			SensorNoise => Ok(SbxNoiseMessage::read(r)?.into()),
 			SensorBME280 => Ok(SbxBME280Message::read(r)?.into()),
+			SensorBME688 => Ok(SbxBME688Message::read(r)?.into()),
 			SensorLight => Ok(SbxLightMessage::read(r)?.into()),
 			SensorStreamAccelX | SensorStreamAccelY | SensorStreamAccelZ | SensorStreamCompassX
 			| SensorStreamCompassY | SensorStreamCompassZ => {

@@ -1,5 +1,7 @@
 use std::fmt::Write;
 
+use log::debug;
+
 use smartstring::alias::String as SmartString;
 
 use crate::bme280;
@@ -8,6 +10,7 @@ use crate::bme280::{
 	PRESSURE_COMPONENT as BME280_PRESSURE_COMPONENT,
 	TEMPERATURE_COMPONENT as BME280_TEMP_COMPONENT,
 };
+use crate::bme68x;
 use crate::metric;
 
 use super::frame;
@@ -124,6 +127,7 @@ impl BME280Readouts {
 	) -> BME280Readouts {
 		let mut path: SmartString = "i2c-2/".into();
 		write!(path, "{:02x}", 0x76 | (msg.instance & 0x1)).expect("formatting");
+		debug!("{:?} {:?} {:?}", msg.dig88, msg.dige1, msg.readout);
 
 		let calibration = bme280::CalibrationData::from_registers(&msg.dig88[..], &msg.dige1[..]);
 		let readout = bme280::Readout::from_registers(&msg.readout[..]);
@@ -179,6 +183,74 @@ impl<'x, T: rtcifier::RTCifier> ReadoutIterable<'x, T> for frame::SbxBME280Messa
 
 	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
 		BME280Readouts::from_msg(self, rtcifier)
+	}
+}
+
+pub struct BME688Readouts(Option<metric::Readout>);
+
+impl BME688Readouts {
+	fn from_msg(
+		msg: &frame::SbxBME688Message,
+		rtcifier: &mut impl rtcifier::RTCifier,
+	) -> BME688Readouts {
+		let mut path: SmartString = "i2c-2/".into();
+		write!(path, "{:02x}", 0x76 | (msg.instance & 0x1)).expect("formatting");
+
+		debug!("{:?} {:?} {:?}", msg.par8a, msg.pare1, msg.readout);
+		let calibration = bme68x::CalibrationData::from_registers(&msg.par8a[..], &msg.pare1[..]);
+		let readout = bme68x::Readout::from_registers(&msg.readout[2..]);
+		let ts = rtcifier.map_to_rtc(msg.timestamp);
+		#[allow(non_snake_case)]
+		let (T, P, H) = readout.decodef(&calibration);
+		let mut components = metric::OrderedVec::new();
+		components.insert(
+			BME280_TEMP_COMPONENT.into(),
+			metric::Value {
+				magnitude: T,
+				unit: metric::Unit::Celsius,
+			},
+		);
+		components.insert(
+			BME280_PRESSURE_COMPONENT.into(),
+			metric::Value {
+				magnitude: P,
+				unit: metric::Unit::Pascal,
+			},
+		);
+		components.insert(
+			BME280_HUMIDITY_COMPONENT.into(),
+			metric::Value {
+				magnitude: H,
+				unit: metric::Unit::Percent,
+			},
+		);
+
+		BME688Readouts(Some(metric::Readout {
+			timestamp: ts,
+			path: metric::DevicePath {
+				instance: path,
+				device_type: "bme688".into(),
+			},
+			components: components,
+		}))
+	}
+}
+
+impl Iterator for BME688Readouts {
+	type Item = metric::Readout;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let mut result = None;
+		std::mem::swap(&mut result, &mut self.0);
+		result
+	}
+}
+
+impl<'x, T: rtcifier::RTCifier> ReadoutIterable<'x, T> for frame::SbxBME688Message {
+	type GenIter = BME688Readouts;
+
+	fn readouts(&'x self, rtcifier: &'x mut T) -> Self::GenIter {
+		BME688Readouts::from_msg(self, rtcifier)
 	}
 }
 

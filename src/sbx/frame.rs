@@ -108,6 +108,7 @@ pub enum SbxMessageType {
 	SensorDHT11 = 0xf3,
 	SensorLight = 0xf4,
 	SensorBME280 = 0xf5,
+	SensorBME688 = 0xf6,
 	SensorStreamAccelX = 0xf8,
 	SensorStreamAccelY = 0xf9,
 	SensorStreamAccelZ = 0xfa,
@@ -476,6 +477,49 @@ impl SbxBME280Message {
 			instance,
 			dig88,
 			dige1,
+			readout,
+		})
+	}
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SbxBME688Message {
+	pub timestamp: u16,
+	pub instance: u8,
+	pub par8a: [u8; 23],
+	pub pare1: [u8; 10],
+	pub readout: [u8; 10],
+}
+
+impl SbxBME688Message {
+	pub const RAW_LEN: usize = std::mem::size_of::<u16>()
+		+ std::mem::size_of::<u8>()
+		+ std::mem::size_of::<u8>() * (23 + 10 + 10);
+
+	pub fn read<R: Buf>(r: &mut R) -> StdIoResult<Self> {
+		if r.remaining() < Self::RAW_LEN {
+			return Err(StdIoError::new(
+				StdIoErrorKind::UnexpectedEof,
+				"not enough bytes for BME688 message",
+			));
+		}
+
+		let timestamp = r.get_u16_le();
+		let instance = r.get_u8();
+		let mut par8a = [0u8; 23];
+		r.copy_to_slice(&mut par8a[..]);
+
+		let mut pare1 = [0u8; 10];
+		r.copy_to_slice(&mut pare1[..]);
+
+		let mut readout = [0u8; 10];
+		r.copy_to_slice(&mut readout[..]);
+
+		Ok(Self {
+			timestamp,
+			instance,
+			par8a,
+			pare1,
 			readout,
 		})
 	}
