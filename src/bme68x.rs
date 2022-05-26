@@ -1,7 +1,5 @@
 use bytes::Buf;
 
-use byteorder::{BigEndian, ByteOrder};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CalibrationData {
 	par_t1: u16,
