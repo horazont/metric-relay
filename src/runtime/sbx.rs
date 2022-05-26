@@ -9,13 +9,15 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 
-use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 use enum_map::{enum_map, EnumMap};
 
-use bytes::Buf;
 #[cfg(feature = "serial")]
+use bytes::Buf;
 use bytes::Bytes;
+
+use super::sbm::{HandlePassthrough, SbmSourceWorker, Sinks};
 
 use crate::metric;
 use crate::sbx;
@@ -35,129 +37,47 @@ pub struct SBXSource {
 
 pub type EndpointFactory = Box<dyn Fn() -> io::Result<snurl::Endpoint> + Send + Sync + 'static>;
 
-struct SBXSourceWorker {
+struct SbxHandler {
 	path_prefix: String,
 	rewrite_bme68x: bool,
-	sample_sink: broadcast::Sender<payload::Sample>,
-	#[allow(dead_code)]
-	stream_sink: broadcast::Sender<payload::Stream>,
-	stop_ch: oneshot::Receiver<()>,
 	rtcifier: sbx::RangeRTC,
 	stream_decoders: EnumMap<sbx::StreamKind, sbx::StreamDecoder<stream::InMemoryBuffer>>,
 	buffer: Vec<Box<sbx::Message>>,
 }
 
-#[cfg(feature = "serial")]
-async fn wait_for_api_frame<S: AsyncRead + Unpin>(src: &mut S) -> io::Result<()> {
-	let mut buf = [0u8; 1];
-	loop {
-		src.read_exact(&mut buf[..]).await?;
-		if buf[0] == 0x7e {
-			return Ok(());
+impl SbxHandler {
+	fn new(path_prefix: String, rewrite_bme68x: bool) -> Self {
+		let accel_period = Duration::from_millis(5);
+		let accel_slice = ChronoDuration::seconds(60);
+		let accel_scale = metric::Value {
+			magnitude: 19.6133,
+			unit: metric::Unit::MeterPerSqSecond,
+		};
+
+		let compass_period = Duration::from_millis(320);
+		let compass_slice = ChronoDuration::seconds(64);
+		let compass_scale = metric::Value {
+			magnitude: 0.0002,
+			unit: metric::Unit::Tesla,
+		};
+
+		Self {
+			path_prefix,
+			rewrite_bme68x,
+			rtcifier: sbx::RangeRTC::default(),
+			stream_decoders: enum_map! {
+				sbx::StreamKind::AccelX => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
+				sbx::StreamKind::AccelY => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
+				sbx::StreamKind::AccelZ => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
+				sbx::StreamKind::CompassX => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
+				sbx::StreamKind::CompassY => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
+				sbx::StreamKind::CompassZ => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
+			},
+			buffer: Vec::new(),
 		}
 	}
-}
 
-enum Error {
-	ConnectionLost,
-	Shutdown,
-}
-
-impl SBXSourceWorker {
-	pub fn spawn_with_snurl(
-		epf: EndpointFactory,
-		path_prefix: String,
-		rewrite_bme68x: bool,
-		sample_sink: broadcast::Sender<payload::Sample>,
-		stream_sink: broadcast::Sender<payload::Stream>,
-		stop_ch: oneshot::Receiver<()>,
-	) -> io::Result<()> {
-		let ep = Box::new(epf()?);
-
-		let accel_period = Duration::from_millis(5);
-		let accel_slice = ChronoDuration::seconds(60);
-		let accel_scale = metric::Value {
-			magnitude: 19.6133,
-			unit: metric::Unit::MeterPerSqSecond,
-		};
-
-		let compass_period = Duration::from_millis(320);
-		let compass_slice = ChronoDuration::seconds(64);
-		let compass_scale = metric::Value {
-			magnitude: 0.0002,
-			unit: metric::Unit::Tesla,
-		};
-
-		let mut worker = Self {
-			path_prefix,
-			rewrite_bme68x,
-			sample_sink,
-			stream_sink,
-			stop_ch,
-			rtcifier: sbx::RangeRTC::default(),
-			stream_decoders: enum_map! {
-				sbx::StreamKind::AccelX => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
-				sbx::StreamKind::AccelY => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
-				sbx::StreamKind::AccelZ => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
-				sbx::StreamKind::CompassX => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
-				sbx::StreamKind::CompassY => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
-				sbx::StreamKind::CompassZ => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
-			},
-			buffer: Vec::new(),
-		};
-		tokio::spawn(async move {
-			worker.run_with_snurl(ep, epf).await;
-		});
-		Ok(())
-	}
-
-	#[cfg(feature = "serial")]
-	pub fn spawn_with_serialstream(
-		src: tokio_serial::SerialStream,
-		path_prefix: String,
-		rewrite_bme68x: bool,
-		sample_sink: broadcast::Sender<payload::Sample>,
-		stream_sink: broadcast::Sender<payload::Stream>,
-		stop_ch: oneshot::Receiver<()>,
-	) {
-		let accel_period = Duration::from_millis(5);
-		let accel_slice = ChronoDuration::seconds(60);
-		let accel_scale = metric::Value {
-			magnitude: 19.6133,
-			unit: metric::Unit::MeterPerSqSecond,
-		};
-
-		let compass_period = Duration::from_millis(320);
-		let compass_slice = ChronoDuration::seconds(64);
-		let compass_scale = metric::Value {
-			magnitude: 0.0002,
-			unit: metric::Unit::Tesla,
-		};
-
-		let mut worker = Self {
-			path_prefix,
-			rewrite_bme68x,
-			sample_sink,
-			stream_sink,
-			stop_ch,
-			rtcifier: sbx::RangeRTC::default(),
-			stream_decoders: enum_map! {
-				sbx::StreamKind::AccelX => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
-				sbx::StreamKind::AccelY => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
-				sbx::StreamKind::AccelZ => sbx::StreamDecoder::new(accel_period, stream::InMemoryBuffer::new(accel_slice), accel_scale.clone()),
-				sbx::StreamKind::CompassX => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
-				sbx::StreamKind::CompassY => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
-				sbx::StreamKind::CompassZ => sbx::StreamDecoder::new(compass_period, stream::InMemoryBuffer::new(compass_slice), compass_scale.clone()),
-			},
-			buffer: Vec::new(),
-		};
-		let src = Box::new(src);
-		tokio::spawn(async move {
-			worker.run_with_serialstream(src).await;
-		});
-	}
-
-	fn process_ready(&mut self, msg: sbx::Message) {
+	fn process_ready(&mut self, msg: sbx::Message, sinks: &mut Sinks) {
 		let prefix = &self.path_prefix;
 		let rewrite_bme68x = self.rewrite_bme68x;
 		let readouts = msg
@@ -172,7 +92,7 @@ impl SBXSourceWorker {
 				Arc::new(x)
 			})
 			.collect();
-		match self.sample_sink.send(readouts) {
+		match sinks.send_sample(readouts) {
 			Ok(_) => (),
 			Err(broadcast::error::SendError(readouts)) => {
 				warn!(
@@ -209,7 +129,7 @@ impl SBXSourceWorker {
 			sbx::Message::StreamData(ref streammsg) => {
 				let decoder = &mut self.stream_decoders[streammsg.kind];
 				if !decoder.ready() {
-					warn!(
+					debug!(
 						"(re-)buffering stream message for {:?} because decoder is not ready",
 						streammsg.kind
 					);
@@ -221,7 +141,7 @@ impl SBXSourceWorker {
 						Err(e) => warn!("malformed stream message received: {}", e),
 					};
 					match decoder.read_next() {
-						Some(block) => match self.stream_sink.send(Arc::new(block)) {
+						Some(block) => match sinks.send_stream(Arc::new(block)) {
 							Ok(_) => (),
 							Err(_) => warn!(
 								"dropped stream data because no receivers were ready to receive"
@@ -234,13 +154,16 @@ impl SBXSourceWorker {
 			_ => (),
 		}
 	}
+}
 
-	fn process_sbx<R: Buf>(
+impl HandlePassthrough for SbxHandler {
+	fn handle(
 		&mut self,
 		timestamp: Option<DateTime<Utc>>,
-		src: &mut R,
+		mut src: Bytes,
+		sinks: &mut Sinks,
 	) -> std::io::Result<()> {
-		let msg = sbx::Message::read(src)?;
+		let msg = sbx::Message::read(&mut src)?;
 		if let sbx::Message::Status(ref status) = msg {
 			if let Some(rtc) = timestamp {
 				self.rtcifier.align(rtc, status.uptime);
@@ -279,91 +202,87 @@ impl SBXSourceWorker {
 			let mut buffer = Vec::new();
 			std::mem::swap(&mut buffer, &mut self.buffer);
 			for msg in buffer.drain(..) {
-				self.process_ready(*msg);
+				self.process_ready(*msg, sinks);
 			}
 		}
-		self.process_ready(msg);
+		self.process_ready(msg, sinks);
 		Ok(())
 	}
 
-	fn process_buf<R: Buf>(&mut self, src: &mut R) -> std::io::Result<()> {
-		let hdr = sbx::EspMessageHeader::read(src)?;
-		match hdr.type_ {
-			sbx::EspMessageType::Status => {
-				// TODO
-			}
-			sbx::EspMessageType::DataPassthrough => {
-				let timestamp = if hdr.timestamp != 0 {
-					Some(Utc.timestamp(hdr.timestamp as i64, 0))
-				} else {
-					None
-				};
-				self.process_sbx(timestamp, src)?;
-			}
+	fn reset(&mut self) {
+		info!("resynchronized to SNURL sender, resetting all state");
+		self.rtcifier.reset();
+		for dec in self.stream_decoders.values_mut() {
+			dec.reset();
 		}
-		Ok(())
-	}
-
-	async fn process_one(&mut self, ep: &mut snurl::Endpoint) -> Result<(), Error> {
-		tokio::select! {
-			received = ep.recv_data() => {
-				match received {
-					// the socket was closed somehow? not sure how that could happen, but we need to shutdown then
-					// well as it turns out it can happen when the network goes down, who would've thought.
-					// which can happen when the router reboots because wifi.
-					// which means we need to be smarter here than that.'
-					None => {
-						warn!("SBX SNURL endpoint closed unexpectedly");
-						Err(Error::ConnectionLost)
-					},
-					Some(snurl::RecvItem::ResyncMarker) => {
-						info!("resynchronized to SNURL sender, resetting all state");
-						self.rtcifier.reset();
-						for dec in self.stream_decoders.values_mut() {
-							dec.reset();
-						}
-						if self.buffer.len() > 0 {
-							warn!("dropping {} buffered frames because of resync", self.buffer.len());
-							self.buffer.clear();
-						}
-						Ok(())
-					},
-					Some(snurl::RecvItem::Data(mut buf)) => {
-						match self.process_buf(&mut buf) {
-							Ok(()) => (),
-							Err(e) => warn!("malformed packet received: {}", e),
-						}
-						Ok(())
-					},
-				}
-			},
-			_ = &mut self.stop_ch => {
-				// SBXSource dropped, shut down
-				// this will cascade down to our recipients then :)
-				Err(Error::Shutdown)
-			},
+		if self.buffer.len() > 0 {
+			warn!(
+				"dropping {} buffered frames because of resync",
+				self.buffer.len()
+			);
+			self.buffer.clear();
 		}
 	}
+}
 
-	async fn run_with_snurl(&mut self, mut ep: Box<snurl::Endpoint>, epf: EndpointFactory) {
-		let epf = super::retry::Retry::new(epf, tokio::time::Duration::new(1, 0));
-		loop {
-			match self.process_one(&mut ep).await {
-				Ok(()) => (),
-				Err(Error::ConnectionLost) => {
-					ep = Box::new(
-						epf.obtain(|e| {
-							warn!("failed to re-establish SNURL endpoint: {}", e);
-						})
-						.await,
-					);
-				}
-				Err(Error::Shutdown) => return,
-			}
+#[cfg(feature = "serial")]
+async fn wait_for_api_frame<S: AsyncRead + Unpin>(src: &mut S) -> io::Result<()> {
+	let mut buf = [0u8; 1];
+	loop {
+		src.read_exact(&mut buf[..]).await?;
+		if buf[0] == 0x7e {
+			return Ok(());
 		}
 	}
+}
 
-	#[cfg(feature = "serial")]
+fn spawn_with_snurl(
+	epf: EndpointFactory,
+	path_prefix: String,
+	rewrite_bme68x: bool,
+	sample_sink: broadcast::Sender<payload::Sample>,
+	stream_sink: broadcast::Sender<payload::Stream>,
+	stop_ch: oneshot::Receiver<()>,
+) -> io::Result<()> {
+	let gw_path_prefix = path_prefix.clone() + "gateway/";
+	let inner = SbxHandler::new(path_prefix, rewrite_bme68x);
+	SbmSourceWorker::spawn_with_snurl(
+		epf,
+		gw_path_prefix,
+		rewrite_bme68x,
+		sample_sink,
+		stream_sink,
+		Some(Box::new(inner)),
+		stop_ch,
+	)
+}
+
+#[cfg(feature = "serial")]
+struct SerialWorker {
+	sinks: Sinks,
+	inner: SbxHandler,
+}
+
+#[cfg(feature = "serial")]
+impl SerialWorker {
+	pub fn spawn(
+		src: tokio_serial::SerialStream,
+		path_prefix: String,
+		rewrite_bme68x: bool,
+		sample_sink: broadcast::Sender<payload::Sample>,
+		stream_sink: broadcast::Sender<payload::Stream>,
+		stop_ch: oneshot::Receiver<()>,
+	) {
+		let mut worker = Self {
+			sinks: Sinks::wrap(sample_sink, stream_sink),
+			inner: SbxHandler::new(path_prefix, rewrite_bme68x),
+		};
+		let src = Box::new(src);
+		tokio::spawn(async move {
+			worker.run_with_serialstream(src, stop_ch).await;
+		});
+	}
+
 	async fn decode_one_from_stream<S: AsyncRead + Unpin>(
 		&mut self,
 		src: &mut S,
@@ -423,7 +342,6 @@ impl SBXSourceWorker {
 		Ok(buf)
 	}
 
-	#[cfg(feature = "serial")]
 	async fn process_one_from_serial(
 		&mut self,
 		src: &mut tokio_serial::SerialStream,
@@ -436,7 +354,7 @@ impl SBXSourceWorker {
 				return Ok(());
 			}
 		};
-		let mut frame = match self.decode_one_from_stream(src).await {
+		let frame = match self.decode_one_from_stream(src).await {
 			Ok(v) => v,
 			Err(e) => {
 				warn!("failed to receive serial frame: {}. backing off.", e);
@@ -445,19 +363,25 @@ impl SBXSourceWorker {
 			}
 		};
 		let timestamp = Utc::now();
-		match self.process_sbx(Some(timestamp), &mut frame) {
+		match self.inner.handle(Some(timestamp), frame, &mut self.sinks) {
 			Ok(()) => (),
 			Err(e) => warn!("malformed packet received: {:?}", e),
 		};
 		Ok(())
 	}
 
-	#[cfg(feature = "serial")]
-	async fn run_with_serialstream(&mut self, mut src: Box<tokio_serial::SerialStream>) {
+	async fn run_with_serialstream(
+		&mut self,
+		mut src: Box<tokio_serial::SerialStream>,
+		mut stop_ch: oneshot::Receiver<()>,
+	) {
 		loop {
-			match self.process_one_from_serial(&mut src).await {
-				Ok(()) => (),
-				Err(()) => return,
+			tokio::select! {
+				result = self.process_one_from_serial(&mut src) => match result {
+					Ok(()) => (),
+					Err(()) => return,
+				},
+				_ = &mut stop_ch => return,
 			}
 		}
 	}
@@ -472,7 +396,7 @@ impl SBXSource {
 		let (sample_zygote, _) = broadcast::channel(384);
 		let (stream_zygote, _) = broadcast::channel(1024);
 		let (guard, stop_ch) = oneshot::channel();
-		SBXSourceWorker::spawn_with_snurl(
+		spawn_with_snurl(
 			epf,
 			path_prefix,
 			rewrite_bme68x,
@@ -496,7 +420,7 @@ impl SBXSource {
 		let (sample_zygote, _) = broadcast::channel(384);
 		let (stream_zygote, _) = broadcast::channel(1024);
 		let (guard, stop_ch) = oneshot::channel();
-		SBXSourceWorker::spawn_with_serialstream(
+		SerialWorker::spawn(
 			src,
 			path_prefix,
 			rewrite_bme68x,

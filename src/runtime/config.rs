@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-#[cfg(feature = "sbx")]
+#[cfg(feature = "sbm")]
 use std::io;
 use std::net;
-#[cfg(feature = "sbx")]
+#[cfg(feature = "sbm")]
 use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
@@ -36,8 +36,10 @@ use super::pubsub;
 #[cfg(feature = "relay")]
 use super::relay;
 use super::router;
+#[cfg(feature = "sbm")]
+use super::sbm;
 #[cfg(feature = "sbx")]
-use super::sbx::SBXSource;
+use super::sbx;
 #[cfg(feature = "smbus")]
 use super::smbus;
 #[cfg(feature = "stream-filearchive")]
@@ -49,7 +51,7 @@ use super::traits;
 
 use crate::metric;
 use crate::script;
-#[cfg(feature = "sbx")]
+#[cfg(feature = "sbm")]
 use crate::snurl;
 #[cfg(feature = "debug")]
 use crate::stream;
@@ -440,6 +442,12 @@ pub enum Node {
 		rewrite_bme68x: bool,
 		transport: SBXTransportConfig,
 	},
+	Mininode {
+		path_prefix: String,
+		#[serde(default = "bool_false")]
+		rewrite_bme68x: bool,
+		transport: SNURLConfig,
+	},
 	Random {
 		device_type: String,
 		instance: String,
@@ -539,7 +547,7 @@ impl Node {
 					let source = match transport {
 						SBXTransportConfig::SNURL(transport) => {
 							let transport = transport.clone();
-							SBXSource::new(
+							sbx::SBXSource::new(
 								Box::new(move || -> io::Result<snurl::Endpoint> {
 									let raw_sock = net::UdpSocket::bind(net::SocketAddr::new(
 										transport.local_address,
@@ -577,7 +585,7 @@ impl Node {
 							.map_err(|e| BuildError::Other(Box::new(e)))?
 						}
 						#[cfg(feature = "serial")]
-						SBXTransportConfig::Serial(transport) => SBXSource::with_serial(
+						SBXTransportConfig::Serial(transport) => sbx::SBXSource::with_serial(
 							tokio_serial::SerialStream::open(&tokio_serial::new(
 								&transport.port,
 								transport.baudrate,
@@ -595,6 +603,59 @@ impl Node {
 					Err(BuildError::FeatureNotAvailable {
 						which: "SBXSource node".into(),
 						feature_name: "sbx",
+					})
+				}
+			}
+			Self::Mininode {
+				path_prefix,
+				rewrite_bme68x,
+				transport,
+			} => {
+				#[cfg(feature = "sbm")]
+				{
+					let transport = transport.clone();
+					let source = sbm::MininodeSource::new(
+						Box::new(move || -> io::Result<snurl::Endpoint> {
+							let raw_sock = net::UdpSocket::bind(net::SocketAddr::new(
+								transport.local_address,
+								transport.local_port,
+							))?;
+
+							raw_sock.set_nonblocking(true)?;
+							if let Some(multicast_group) = transport.multicast_group.as_ref() {
+								match (multicast_group, transport.local_address) {
+								(IpAddr::V4(mc_group), IpAddr::V4(ifaddr)) => {
+									raw_sock.join_multicast_v4(mc_group, &ifaddr)?
+								},
+								(IpAddr::V6(_), IpAddr::V6(_)) => {
+									panic!("multicast operation not supported on ipv6")
+								},
+								_ => panic!("multicast group address family differs from local address family")
+							}
+							}
+							let sock = snurl::Socket::new(
+								tokio::net::UdpSocket::from_std(raw_sock)
+									.expect("conversion to tokio socket"),
+								net::SocketAddr::new(
+									transport.remote_address,
+									transport.remote_port,
+								),
+								transport.passive,
+							);
+							Ok(snurl::Endpoint::new(sock))
+						}),
+						path_prefix.clone(),
+						*rewrite_bme68x,
+					)
+					.map_err(|e| BuildError::Other(Box::new(e)))?;
+					Ok(traits::Node::from_source(source))
+				}
+				#[cfg(not(feature = "sbm"))]
+				{
+					let _ = (path_prefix, rewrite_bme68x, transport);
+					Err(BuildError::FeatureNotAvailable {
+						which: "Mininode node".into(),
+						feature_name: "sbm",
 					})
 				}
 			}
