@@ -263,6 +263,38 @@ func! {
 			}))
 		}
 	}
+
+	impl Func for LogicalAnd as LOGAND<"&&">, NAMED_LOGAND<"and"> {
+		fn compile<'x>(
+				&self,
+				compiler: &Compiler,
+				_loc: Location,
+				_name: &str,
+				argv: Vec<Node<'x>>,
+		) -> CompileResult<Box<dyn Evaluate>> {
+			// and is the ∀ operator, which is true for the empty set
+			if argv.len() == 0 {
+				return Ok(Box::new(Constant(FTRUE)))
+			}
+			Ok(Box::new(LogicalAndOp(compiler.compile_as_exprs(argv)?)))
+		}
+	}
+
+	impl Func for LogicalOr as LOGOR<"||">, NAMED_LOGOR<"or"> {
+		fn compile<'x>(
+				&self,
+				compiler: &Compiler,
+				_loc: Location,
+				_name: &str,
+				argv: Vec<Node<'x>>,
+		) -> CompileResult<Box<dyn Evaluate>> {
+			// and is the ∃ operator, which is false for the empty set
+			if argv.len() == 0 {
+				return Ok(Box::new(Constant(FFALSE)))
+			}
+			Ok(Box::new(LogicalOrOp(compiler.compile_as_exprs(argv)?)))
+		}
+	}
 }
 
 macro_rules! f2func {

@@ -3,6 +3,13 @@ use std::fmt;
 use super::context::{Context, Evaluate};
 use super::result::{EvalError, EvalResult};
 
+pub const FTRUE: f64 = 1.0;
+pub const FFALSE: f64 = 0.0;
+
+pub fn is_float_true(f: f64) -> bool {
+	f > 0.0
+}
+
 #[derive(Debug)]
 pub(super) struct Constant(pub f64);
 
@@ -105,6 +112,58 @@ impl fmt::Display for PowOp {
 impl Evaluate for PowOp {
 	fn evaluate<'x>(&self, ctx: &'x Context) -> EvalResult<f64> {
 		Ok(self.lhs.evaluate(ctx)?.powf(self.rhs.evaluate(ctx)?))
+	}
+}
+
+#[derive(Debug)]
+pub(super) struct LogicalAndOp(pub Vec<Box<dyn Evaluate>>);
+
+impl fmt::Display for LogicalAndOp {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		for (i, op) in self.0.iter().enumerate() {
+			if i > 0 {
+				f.write_str(" ")?;
+			}
+			write!(f, "{}", op)?;
+		}
+		write!(f, "&&")
+	}
+}
+
+impl Evaluate for LogicalAndOp {
+	fn evaluate<'x>(&self, ctx: &'x Context) -> EvalResult<f64> {
+		for op in self.0.iter() {
+			if !is_float_true(op.evaluate(ctx)?) {
+				return Ok(FFALSE);
+			}
+		}
+		Ok(FTRUE)
+	}
+}
+
+#[derive(Debug)]
+pub(super) struct LogicalOrOp(pub Vec<Box<dyn Evaluate>>);
+
+impl fmt::Display for LogicalOrOp {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		for (i, op) in self.0.iter().enumerate() {
+			if i > 0 {
+				f.write_str(" ")?;
+			}
+			write!(f, "{}", op)?;
+		}
+		write!(f, "||")
+	}
+}
+
+impl Evaluate for LogicalOrOp {
+	fn evaluate<'x>(&self, ctx: &'x Context) -> EvalResult<f64> {
+		for op in self.0.iter() {
+			if is_float_true(op.evaluate(ctx)?) {
+				return Ok(FTRUE);
+			}
+		}
+		Ok(FFALSE)
 	}
 }
 
