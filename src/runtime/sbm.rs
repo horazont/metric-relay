@@ -108,7 +108,7 @@ impl SbmSourceWorker {
 	fn process_buf(&mut self, mut src: Bytes) -> std::io::Result<()> {
 		let hdr = sbm::EspMessageHeader::read(&mut src)?;
 		trace!("processing message {:?} {:?}", hdr, src);
-		let timestamp = if hdr.timestamp != 0 {
+		let timestamp = if hdr.timestamp >= 86400 {
 			Some(Utc.timestamp(hdr.timestamp as i64, 0))
 		} else {
 			None
