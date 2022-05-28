@@ -17,6 +17,8 @@ use smartstring::alias::String as SmartString;
 use serde::{de, Deserialize as DeserializeTrait, Deserializer};
 use serde_derive::Deserialize;
 
+use log::Level;
+
 use glob;
 
 #[cfg(feature = "csv")]
@@ -1113,6 +1115,11 @@ pub enum Filter {
 		component_name: String,
 		mapping: HashMap<SmartString, f64>,
 	},
+	KeepIfPlausible {
+		predicate: Option<FilterPredicate>,
+		#[serde(default = "bool_false")]
+		log_loudly: bool,
+	},
 }
 
 impl Filter {
@@ -1200,6 +1207,20 @@ impl Filter {
 				unit: unit.0.clone(),
 				component: component_name.into(),
 				mapping: mapping.clone(),
+			})),
+			Self::KeepIfPlausible {
+				predicate,
+				log_loudly,
+			} => Ok(Box::new(filter::KeepIfPlausible {
+				predicate: match predicate {
+					Some(p) => p.build()?,
+					None => filter::SelectByPath::default(),
+				},
+				loglevel: if *log_loudly {
+					Level::Warn
+				} else {
+					Level::Debug
+				},
 			})),
 		}
 	}

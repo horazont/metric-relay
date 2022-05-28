@@ -60,6 +60,15 @@ impl Unit {
 			Self::Status => "",
 		}
 	}
+
+	pub fn plausible_range(&self) -> (Option<f64>, Option<f64>) {
+		match self {
+			Self::Celsius => (Some(-273.15), None),
+			Self::Percent => (Some(0.0), Some(100.0)),
+			Self::Kelvin => (Some(0.0), None),
+			_ => (None, None),
+		}
+	}
 }
 
 impl FromStr for Unit {
@@ -108,6 +117,34 @@ impl fmt::Display for DevicePath {
 pub struct Value {
 	pub magnitude: f64,
 	pub unit: Unit,
+}
+
+impl fmt::Display for Value {
+	fn fmt<'f>(&self, f: &'f mut fmt::Formatter) -> fmt::Result {
+		let suffix = self.unit.as_str();
+		if suffix.len() > 0 {
+			write!(f, "{} {}", self.magnitude, suffix)
+		} else {
+			write!(f, "{}", self.magnitude)
+		}
+	}
+}
+
+impl Value {
+	pub fn is_plausible(&self) -> bool {
+		let (min, max) = self.unit.plausible_range();
+		if let Some(min) = min {
+			if self.magnitude < min {
+				return false;
+			}
+		}
+		if let Some(max) = max {
+			if self.magnitude > max {
+				return false;
+			}
+		}
+		true
+	}
 }
 
 #[derive(Clone, Debug, PartialEq)]

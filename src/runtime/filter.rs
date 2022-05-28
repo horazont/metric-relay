@@ -1,4 +1,4 @@
-use log::{trace, warn};
+use log::{log, trace, warn, Level};
 use smartstring::alias::String as SmartString;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -150,6 +150,36 @@ impl Filter for Calc {
 					unit: self.new_unit.clone(),
 				},
 			);
+		}
+		Some(input)
+	}
+}
+
+pub struct KeepIfPlausible {
+	pub predicate: SelectByPath,
+	pub loglevel: Level,
+}
+
+impl Filter for KeepIfPlausible {
+	fn process_readout(&self, input: payload::Readout) -> Option<payload::Readout> {
+		if !self.predicate.matches_readout(&input) {
+			trace!(
+				"skipping plausibility check on {:?} because it was rejected by the predicate",
+				input
+			);
+			return Some(input);
+		}
+
+		for (_, v) in input.components.iter() {
+			if !v.is_plausible() {
+				log!(
+					self.loglevel,
+					"dropping readout {:?} because of implausible value {}",
+					input,
+					v,
+				);
+				return None;
+			}
 		}
 		Some(input)
 	}
