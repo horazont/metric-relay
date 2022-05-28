@@ -482,7 +482,7 @@ impl<'x> Iterator for StatusReadouts<'x> {
 					timestamp: self.ts.clone(),
 					path: metric::DevicePath {
 						instance: path,
-						device_type: "driver".into(),
+						device_type: "i2c-driver".into(),
 					},
 					components,
 				};
@@ -519,7 +519,7 @@ impl<'x> Iterator for StatusReadouts<'x> {
 					timestamp: self.ts.clone(),
 					path: metric::DevicePath {
 						instance: path,
-						device_type: "driver".into(),
+						device_type: "bmex8x-driver".into(),
 					},
 					components,
 				};
@@ -571,7 +571,7 @@ impl<'x> Iterator for StatusReadouts<'x> {
 						timestamp: self.ts.clone(),
 						path: metric::DevicePath {
 							instance: path,
-							device_type: "kernel".into(),
+							device_type: "stm32-tx".into(),
 						},
 						components,
 					}),
@@ -601,7 +601,7 @@ impl<'x> Iterator for StatusReadouts<'x> {
 						timestamp: self.ts.clone(),
 						path: metric::DevicePath {
 							instance: path,
-							device_type: "kernel".into(),
+							device_type: "stm32-cpu".into(),
 						},
 						components,
 					}),
