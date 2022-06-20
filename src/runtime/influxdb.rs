@@ -44,31 +44,52 @@ impl InfluxDBWorker {
 
 	async fn run(&mut self) {
 		loop {
-			let mut readouts = match self.samples.recv().await {
+			let mut maybe_readouts = Some(match self.samples.recv().await {
 				None => return,
 				Some(v) => v,
-			};
+			});
 
 			let mut by_precision =
 				EnumMap::<influxdb::Precision, Vec<Arc<influxdb::Readout>>>::new();
-			let nreadouts = readouts.len();
-			for readout in readouts.drain(..) {
-				let influx_readout =
-					match self
-						.filters
-						.process(Arc::new(influxdb::Readout::from_metric(
-							&readout,
-							self.precision,
-						))) {
-						Some(v) => v,
-						None => continue,
-					};
-				let target = &mut by_precision[influx_readout.precision];
-				if target.capacity() == 0 {
-					// optimize for the general case where all samples will have the same precision
-					target.reserve(nreadouts);
+			// instead of receiving just once, we'll try to get more and more
+			// samples until the queue is empty. as we don't yield, we're
+			// likely to be much faster consuming than anyone can be
+			// producing, or at least I hope so ... ok, you got me, let's
+			// build in a handbreak. But other than that, the idea is that
+			// influx is writing to disk and that may be slow and if we only
+			// submit stuff one by one we'll easily be too slow for the
+			// serializer.
+
+			// This is the promised handbreak: we'll only batch up to 256
+			// readouts. This is unlikely to ever happen because serializers
+			// are generally less deep than that.
+			for _ in 0..256 {
+				let mut readouts = match maybe_readouts {
+					Some(v) => v,
+					None => continue,
+				};
+				let nreadouts = readouts.len();
+				for readout in readouts.drain(..) {
+					let influx_readout =
+						match self
+							.filters
+							.process(Arc::new(influxdb::Readout::from_metric(
+								&readout,
+								self.precision,
+							))) {
+							Some(v) => v,
+							None => continue,
+						};
+					let target = &mut by_precision[influx_readout.precision];
+					if target.capacity() == 0 {
+						// optimize for the general case where all samples will have the same precision
+						target.reserve(nreadouts);
+					}
+					target.push(influx_readout);
 				}
-				target.push(influx_readout);
+				// if it fails, we don't care why -- we'll see it when we call
+				// recv() the next time and handle it there.
+				maybe_readouts = self.samples.try_recv().ok();
 			}
 
 			for (precision, readouts) in by_precision.iter() {
