@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::error;
+use log::{error, warn};
 
 use tokio::select;
 use tokio::sync::broadcast;
@@ -38,11 +38,12 @@ impl RelaySourceWorker {
 						// we use the stop_ch as a guard.
 						let _ = self.stream_sink.send(b.into());
 					},
-					Err(_) => {
+					Err(broadcast::error::RecvError::Closed) => {
 						// socket went down, close.
 						error!("lost RecvSocket somehow");
 						return;
 					},
+					Err(broadcast::error::RecvError::Lagged(n)) => warn!("lost {} relay messages", n),
 				},
 			}
 		}
