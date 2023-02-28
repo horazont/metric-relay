@@ -1,8 +1,16 @@
 #![allow(dead_code)]
 use std::borrow::Borrow;
 use std::cmp::PartialEq;
+use std::fmt;
 use std::iter::FromIterator;
+use std::marker::PhantomData;
 use std::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
+
+use serde::{
+	de::{Deserializer, SeqAccess, Visitor},
+	ser::{SerializeSeq, Serializer},
+	Deserialize,
+};
 
 use bitvec::prelude::{BitSlice, BitVec, Lsb0};
 
@@ -13,10 +21,52 @@ type MaskVec = BitVec<usize, Lsb0>;
 type MaskSlice = BitSlice<usize, Lsb0>;
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
 pub struct MaskedArray<T> {
 	mask: MaskVec,
 	values: Vec<T>,
+}
+
+struct MaskedArrayVisitor<T>(PhantomData<T>);
+
+impl<'de, T: Deserialize<'de> + Default> Visitor<'de> for MaskedArrayVisitor<T> {
+	type Value = MaskedArray<T>;
+
+	fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str("a masked array")
+	}
+
+	fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+		let mut result = MaskedArray::with_capacity(seq.size_hint().unwrap_or(0));
+		while let Some(next) = seq.next_element()? {
+			result.push_option(next);
+		}
+		Ok(result)
+	}
+}
+
+impl<'de, T: Deserialize<'de> + Default> serde::Deserialize<'de> for MaskedArray<T> {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		deserializer.deserialize_seq(MaskedArrayVisitor(PhantomData))
+	}
+}
+
+impl<T: serde::Serialize> serde::Serialize for MaskedArray<T>
+where
+	Option<T>: serde::Serialize,
+{
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		let mut seq = serializer.serialize_seq(Some(self.len()))?;
+		for item in self.iter_optional(..) {
+			seq.serialize_element(&item)?;
+		}
+		seq.end()
+	}
 }
 
 impl<T: Clone> MaskedArray<T> {
@@ -103,6 +153,20 @@ fn rangeify(l: usize, range: impl RangeBounds<usize>) -> Range<usize> {
 }
 
 impl<T> MaskedArray<T> {
+	pub fn new() -> Self {
+		Self {
+			mask: MaskVec::new(),
+			values: Vec::new(),
+		}
+	}
+
+	pub fn with_capacity(cap: usize) -> Self {
+		Self {
+			mask: MaskVec::with_capacity(cap),
+			values: Vec::with_capacity(cap),
+		}
+	}
+
 	pub fn from_unmasked_vec(values: Vec<T>) -> Self {
 		let mut mask = BitVec::with_capacity(values.len());
 		mask.resize(values.len(), true);
@@ -210,6 +274,22 @@ impl<T> MaskedArray<T> {
 		Optional {
 			mask: &self.mask[r.clone()],
 			values: &self.values[r],
+		}
+	}
+
+	pub fn push_option(&mut self, v: Option<T>)
+	where
+		T: Default,
+	{
+		match v {
+			Some(v) => {
+				self.mask.push(true);
+				self.values.push(v);
+			}
+			None => {
+				self.mask.push(false);
+				self.values.push(T::default());
+			}
 		}
 	}
 }
