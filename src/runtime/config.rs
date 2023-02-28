@@ -536,7 +536,7 @@ pub enum Node {
 		sleep_ms: u32,
 	},
 	Samplify {
-		component: String,
+		fixed_component: Option<String>,
 	},
 }
 
@@ -1054,8 +1054,11 @@ impl Node {
 					})
 				}
 			}
-			Self::Samplify { component } => Ok(traits::Node::from(samplify::Samplify::new(
-				component.into(),
+			Self::Samplify { fixed_component } => Ok(traits::Node::from(samplify::Samplify::new(
+				match fixed_component {
+					Some(v) => samplify::ComponentMode::Static(v.into()),
+					None => samplify::ComponentMode::PopFromPath,
+				},
 			))),
 		}
 	}
@@ -1078,6 +1081,13 @@ impl FilterPredicate {
 			match_instance: self.match_instance.clone().and_then(|p| Some(p.0)),
 		})
 	}
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MapInstanceAndComponentEntry {
+	old_component: String,
+	new_component: String,
+	new_instance: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1126,6 +1136,10 @@ pub enum Filter {
 		predicate: Option<FilterPredicate>,
 		#[serde(default = "bool_false")]
 		log_loudly: bool,
+	},
+	MapInstanceAndComponent {
+		predicate: Option<FilterPredicate>,
+		mapping: HashMap<String, MapInstanceAndComponentEntry>,
 	},
 }
 
@@ -1229,6 +1243,27 @@ impl Filter {
 					Level::Debug
 				},
 			})),
+			Self::MapInstanceAndComponent { predicate, mapping } => {
+				Ok(Box::new(filter::MapInstanceAndComponent {
+					predicate: match predicate {
+						Some(p) => p.build()?,
+						None => filter::SelectByPath::default(),
+					},
+					mapping: mapping
+						.iter()
+						.map(|(k, v)| {
+							(
+								k.into(),
+								(
+									v.old_component.clone().into(),
+									v.new_instance.clone().into(),
+									v.new_component.clone().into(),
+								),
+							)
+						})
+						.collect(),
+				}))
+			}
 		}
 	}
 }

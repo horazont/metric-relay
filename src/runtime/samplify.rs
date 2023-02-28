@@ -4,14 +4,33 @@ use smartstring::alias::String as SmartString;
 
 use tokio::sync::{broadcast, mpsc};
 
-use crate::metric::{OrderedVec, Readout, Value};
+use crate::metric::{DevicePath, OrderedVec, Readout, Value};
 
 use super::adapter::Serializer;
 use super::payload;
 use super::traits::{null_receiver, Sink, Source};
 
+pub enum ComponentMode {
+	Static(SmartString),
+	PopFromPath,
+}
+
+impl ComponentMode {
+	fn create(&self, path: &mut DevicePath) -> Option<SmartString> {
+		match self {
+			Self::Static(v) => Some(v.clone()),
+			Self::PopFromPath => {
+				let index = path.instance.rfind('/')?;
+				let result = path.instance.split_off(index + 1);
+				path.instance.truncate(index);
+				Some(result)
+			}
+		}
+	}
+}
+
 async fn samplify(
-	component: SmartString,
+	component: ComponentMode,
 	mut stream_source: mpsc::Receiver<payload::Stream>,
 	sample_sink: broadcast::Sender<payload::Sample>,
 ) {
@@ -26,6 +45,11 @@ async fn samplify(
 			let normalized = match sample.normalized() {
 				Some(v) => v,
 				None => continue,
+			};
+			let mut path = block.path.clone();
+			let component = match component.create(&mut path) {
+				Some(v) => v,
+				None => "value".into(),
 			};
 			let timestamp = block.t0
 				+ match chrono::Duration::from_std((i as u32) * block.period) {
@@ -44,7 +68,7 @@ async fn samplify(
 			};
 			samples.push(Arc::new(Readout {
 				timestamp,
-				path: block.path.clone(),
+				path,
 				components: OrderedVec::single(component.clone(), value),
 			}));
 		}
@@ -63,7 +87,7 @@ pub struct Samplify {
 }
 
 impl Samplify {
-	pub fn new(component: SmartString) -> Self {
+	pub fn new(component: ComponentMode) -> Self {
 		let (streams, stream_source) = Serializer::new(128);
 		let (sample_zygote, _) = broadcast::channel(128);
 		let sample_sink = sample_zygote.clone();

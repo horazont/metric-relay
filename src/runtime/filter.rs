@@ -394,6 +394,34 @@ impl Filter for MapDeviceType {
 	}
 }
 
+pub struct MapInstanceAndComponent {
+	pub predicate: SelectByPath,
+	pub mapping: HashMap<SmartString, (SmartString, SmartString, SmartString)>,
+}
+
+impl Filter for MapInstanceAndComponent {
+	fn process_readout(&self, mut input: payload::Readout) -> Option<payload::Readout> {
+		if !self.predicate.matches_readout(&input) {
+			return Some(input);
+		}
+
+		match self.mapping.get(&input.path.instance) {
+			Some((old_component, new_instance, new_component)) => {
+				let input_mut = Arc::make_mut(&mut input);
+				match input_mut.components.remove(old_component) {
+					Some(v) => {
+						input_mut.components.insert(new_component.clone(), v);
+						input_mut.path.instance = new_instance.clone();
+					}
+					None => (),
+				}
+			}
+			None => (),
+		}
+		Some(input)
+	}
+}
+
 impl Filter for Vec<Box<dyn Filter>> {
 	fn process_readout(&self, mut item: payload::Readout) -> Option<payload::Readout> {
 		for filter in self.iter() {
