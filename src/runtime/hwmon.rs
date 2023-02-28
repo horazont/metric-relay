@@ -189,7 +189,6 @@ impl Scrape {
 				Ok(_) => (),
 				Err(_) => {
 					warn!("no receivers on route, dropping scrape");
-					continue;
 				}
 			}
 			let now = Instant::now();
