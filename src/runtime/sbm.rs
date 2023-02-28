@@ -109,7 +109,7 @@ impl SbmSourceWorker {
 		let hdr = sbm::EspMessageHeader::read(&mut src)?;
 		trace!("processing message {:?} {:?}", hdr, src);
 		let timestamp = if hdr.timestamp >= 86400 {
-			Some(Utc.timestamp(hdr.timestamp as i64, 0))
+			Utc.timestamp_opt(hdr.timestamp as i64, 0).single()
 		} else {
 			None
 		};

@@ -62,7 +62,7 @@ pub struct Descriptor {
 impl Descriptor {
 	pub fn new(component: SmartString, period: Duration, slice: chrono::Duration) -> Self {
 		Self {
-			prev_t: chrono::MIN_DATETIME,
+			prev_t: chrono::DateTime::<Utc>::MIN_UTC,
 			seq: 0,
 			period,
 			component,

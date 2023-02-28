@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use log::trace;
 
-use base64;
+use base64::Engine;
 use bytes::{BufMut, BytesMut};
 use reqwest;
 
@@ -33,7 +33,8 @@ impl Auth {
 				"Authorization",
 				format!(
 					"Basic {}",
-					base64::encode(format!("{}:{}", username, password,))
+					base64::engine::general_purpose::STANDARD
+						.encode(format!("{}:{}", username, password,))
 				),
 			),
 			Self::Query { username, password } => req.query(&[("u", username), ("p", password)]),

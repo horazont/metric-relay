@@ -9,8 +9,8 @@ use bitvec::prelude::{BitSlice, BitVec, Lsb0};
 #[cfg(feature = "metric-serde")]
 use serde_derive::{Deserialize, Serialize};
 
-type MaskVec = BitVec<Lsb0, usize>;
-type MaskSlice = BitSlice<Lsb0, usize>;
+type MaskVec = BitVec<usize, Lsb0>;
+type MaskSlice = BitSlice<usize, Lsb0>;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "metric-serde", derive(Serialize, Deserialize))]
@@ -126,12 +126,12 @@ impl<T> MaskedArray<T> {
 
 	pub fn unmask(&mut self, range: impl RangeBounds<usize>) {
 		let len = self.mask.len();
-		self.mask[rangeify(len, range)].set_all(true);
+		self.mask[rangeify(len, range)].fill(true);
 	}
 
 	pub fn mask(&mut self, range: impl RangeBounds<usize>) {
 		let len = self.mask.len();
-		self.mask[rangeify(len, range)].set_all(false);
+		self.mask[rangeify(len, range)].fill(false);
 	}
 
 	#[inline]
@@ -140,12 +140,12 @@ impl<T> MaskedArray<T> {
 	}
 
 	#[inline]
-	pub fn iter_mask<'x>(&'x self) -> bitvec::slice::Iter<'x, Lsb0, usize> {
+	pub fn iter_mask<'x>(&'x self) -> bitvec::slice::Iter<'x, usize, Lsb0> {
 		self.mask.iter()
 	}
 
 	#[inline]
-	pub fn iter_mask_mut<'x>(&'x mut self) -> bitvec::slice::IterMut<'x, Lsb0, usize> {
+	pub fn iter_mask_mut<'x>(&'x mut self) -> bitvec::slice::IterMut<'x, usize, Lsb0> {
 		self.mask.iter_mut()
 	}
 

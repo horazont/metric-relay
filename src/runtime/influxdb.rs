@@ -4,8 +4,6 @@ use log::warn;
 
 use tokio::sync::mpsc;
 
-use enum_map::EnumMap;
-
 use crate::influxdb;
 use crate::influxdb::Filter;
 
@@ -49,8 +47,9 @@ impl InfluxDBWorker {
 				Some(v) => v,
 			});
 
-			let mut by_precision =
-				EnumMap::<influxdb::Precision, Vec<Arc<influxdb::Readout>>>::new();
+			let mut by_precision = enum_map::enum_map! {
+				_ => Vec::new(),
+			};
 			// instead of receiving just once, we'll try to get more and more
 			// samples until the queue is empty. as we don't yield, we're
 			// likely to be much faster consuming than anyone can be
@@ -80,7 +79,8 @@ impl InfluxDBWorker {
 							Some(v) => v,
 							None => continue,
 						};
-					let target = &mut by_precision[influx_readout.precision];
+					let target: &mut Vec<Arc<influxdb::Readout>> =
+						&mut by_precision[influx_readout.precision];
 					if target.capacity() == 0 {
 						// optimize for the general case where all samples will have the same precision
 						target.reserve(nreadouts);
