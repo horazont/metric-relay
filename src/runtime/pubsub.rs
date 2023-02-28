@@ -23,7 +23,7 @@ impl PubSubWorker {
 			for readout in readouts.drain(..) {
 				match self.client.post(&readout).await {
 					Ok(_) => (),
-					Err(e) => warn!("lost sample: failed to submit to influxdb: {}", e),
+					Err(e) => warn!("lost sample: failed to submit to pubsub: {}", e),
 				};
 			}
 		}
