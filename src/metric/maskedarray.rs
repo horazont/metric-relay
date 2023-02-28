@@ -203,6 +203,15 @@ impl<T> MaskedArray<T> {
 			fill,
 		}
 	}
+
+	pub fn iter_optional<'a>(&'a self, r: impl RangeBounds<usize>) -> Optional<'a, T> {
+		let len = self.mask.len();
+		let r = rangeify(len, r);
+		Optional {
+			mask: &self.mask[r.clone()],
+			values: &self.values[r],
+		}
+	}
 }
 
 impl<T> FromIterator<T> for MaskedArray<T> {
@@ -498,6 +507,32 @@ impl<'a, T> Iterator for Filled<'a, T> {
 					Some(value)
 				} else {
 					Some(&self.fill)
+				}
+			}
+			None => None,
+		}
+	}
+}
+
+pub struct Optional<'a, T> {
+	mask: &'a MaskSlice,
+	values: &'a [T],
+}
+
+impl<'a, T> Iterator for Optional<'a, T> {
+	type Item = Option<&'a T>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		debug_assert!(self.mask.len() == self.values.len());
+		match self.mask.split_first() {
+			Some((valid, mtail)) => {
+				let (value, vtail) = self.values.split_first().unwrap();
+				self.mask = mtail;
+				self.values = vtail;
+				if *valid {
+					Some(Some(value))
+				} else {
+					Some(None)
 				}
 			}
 			None => None,

@@ -196,11 +196,57 @@ pub enum RawData {
 	F64(MaskedArray<f64>),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum RawSample {
+	/* I8(MaskedArray<i8>),
+	U8(MaskedArray<u8>), */
+	I16(Option<i16>),
+	/* U16(MaskedArray<u16>),
+	I32(MaskedArray<i32>),
+	U32(MaskedArray<u32>),
+	I64(MaskedArray<i64>),
+	U64(MaskedArray<u64>),
+	F32(MaskedArray<f32>), */
+	F64(Option<f64>),
+}
+
+impl RawSample {
+	pub fn normalized(self) -> Option<f64> {
+		match self {
+			Self::I16(v) => Some((v? as f64) / (i16::MAX as f64)),
+			Self::F64(v) => Some(v?),
+		}
+	}
+}
+
 impl RawData {
 	pub fn len(&self) -> usize {
 		match self {
 			Self::I16(v) => v.len(),
 			Self::F64(v) => v.len(),
+		}
+	}
+
+	pub fn iter(&self) -> RawDataIter<'_> {
+		match self {
+			Self::I16(a) => RawDataIter::I16(a.iter_optional(..)),
+			Self::F64(a) => RawDataIter::F64(a.iter_optional(..)),
+		}
+	}
+}
+
+pub enum RawDataIter<'x> {
+	I16(maskedarray::Optional<'x, i16>),
+	F64(maskedarray::Optional<'x, f64>),
+}
+
+impl<'x> Iterator for RawDataIter<'x> {
+	type Item = RawSample;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::I16(ref mut iter) => Some(RawSample::I16(iter.next()?.copied())),
+			Self::F64(ref mut iter) => Some(RawSample::F64(iter.next()?.copied())),
 		}
 	}
 }

@@ -39,6 +39,10 @@ impl<K, V> OrderedVec<K, V> {
 		Self(Vec::with_capacity(capacity))
 	}
 
+	pub fn single(k: K, v: V) -> Self {
+		Self(vec![(k, v)])
+	}
+
 	#[inline]
 	fn find<Q: ?Sized>(&self, k: &Q) -> Result<usize, usize>
 	where

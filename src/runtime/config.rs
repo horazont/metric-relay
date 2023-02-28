@@ -38,6 +38,7 @@ use super::pubsub;
 #[cfg(feature = "relay")]
 use super::relay;
 use super::router;
+use super::samplify;
 #[cfg(feature = "sbm")]
 use super::sbm;
 #[cfg(feature = "sbx")]
@@ -533,6 +534,9 @@ pub enum Node {
 		start_time: chrono::DateTime<chrono::Utc>,
 		end_time: chrono::DateTime<chrono::Utc>,
 		sleep_ms: u32,
+	},
+	Samplify {
+		component: String,
 	},
 }
 
@@ -1050,6 +1054,9 @@ impl Node {
 					})
 				}
 			}
+			Self::Samplify { component } => Ok(traits::Node::from(samplify::Samplify::new(
+				component.into(),
+			))),
 		}
 	}
 }

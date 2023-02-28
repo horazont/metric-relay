@@ -22,6 +22,7 @@ mod relay;
 #[cfg(feature = "sbm")]
 mod retry;
 mod router;
+mod samplify;
 #[cfg(feature = "sbm")]
 mod sbm;
 #[cfg(feature = "sbx")]
